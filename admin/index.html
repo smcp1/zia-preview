@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>지아한의원 관리</title>
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+  <!-- 로그인 화면 -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-card card">
+      <h1 class="login-title">지아한의원 관리</h1>
+      <p class="login-desc">홈페이지 내용을 관리하는 곳이에요.<br>이메일과 비밀번호로 로그인해 주세요.</p>
+      <div id="login-error" class="login-error hidden" role="alert"></div>
+      <form id="login-form">
+        <div class="field">
+          <label for="login-email">이메일</label>
+          <input type="email" id="login-email" autocomplete="username" placeholder="예: won@example.com" required>
+        </div>
+        <div class="field">
+          <label for="login-password">비밀번호</label>
+          <input type="password" id="login-password" autocomplete="current-password" required>
+        </div>
+        <div class="form-actions">
+          <button type="submit" id="login-submit" class="btn-primary btn-block">로그인</button>
+        </div>
+      </form>
+      <p class="login-foot">비밀번호를 잊으셨나요? 관리 담당자(GUAVA)에게 연락해 주세요.</p>
+    </div>
+  </div>
+
+  <!-- 앱 화면 -->
+  <div id="app-screen" class="hidden">
+    <header class="app-header">
+      <button type="button" id="btn-brand" class="btn-ghost brand">지아한의원 관리</button>
+      <div class="head-right">
+        <span id="head-email" class="head-email"></span>
+        <button type="button" id="btn-password" class="btn-ghost btn-sm">비밀번호 변경</button>
+        <button type="button" id="btn-logout" class="btn-secondary btn-sm">로그아웃</button>
+      </div>
+    </header>
+    <main id="view-root" class="view-root"></main>
+  </div>
+
+  <div id="toast" class="hidden" role="status"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/lint-terms.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
