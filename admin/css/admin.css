@@ -369,22 +369,8 @@ button.pick-item:hover { border-color: var(--green); background: var(--green-pal
 .zone-hero .img-drop { min-height: 64px; padding: 8px; }
 .zone-hero .img-drop-preview { max-height: 64px; }
 
-/* ── P3-e: 홈페이지 보며 수정 (#/live) ────────────────────────── */
-.dash-card-live {
-  grid-column: 1 / -1;
-  background: linear-gradient(135deg, var(--green-pale), #fff);
-  border: 2px solid var(--green);
-  padding: 30px 26px;
-}
-.dash-card-live .dash-icon { background: var(--green); color: #fff; font-size: 1.5rem; width: 56px; height: 56px; }
-.dash-card-live h2 { font-size: 1.45rem; color: var(--green-dark); }
-.dash-card-live p { font-size: 1.02rem; }
-
-.live-bar {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-.live-bar select { max-width: 240px; }
+/* ── P3-e/P3-f: 홈페이지 보며 수정 (#/live) ───────────────────── */
+/* (P3-f 로 대시보드 큰 카드·상단 바 마크업이 없어져 .dash-card-live / .live-bar 규칙 제거) */
 .live-device { display: inline-flex; border: 1.5px solid var(--line); border-radius: 10px; overflow: hidden; }
 .live-dev-btn {
   min-height: 44px; padding: 0 16px; border: none; border-radius: 0;
@@ -419,6 +405,134 @@ button.pick-item:hover { border-color: var(--green); background: var(--green-pal
 }
 #toast .toast-view-btn:hover { background: rgba(255, 255, 255, 0.28); }
 
+/* ══ P3-f: 전폭 라이브 캔버스 (#/live) ══════════════════════════════
+ * body.live-mode 일 때만 #view-root 의 880px 제약을 푼다 (다른 화면 회귀 0).
+ * --head-h = 헤더 실측 높이 (app.js syncHeaderHeight — 헤더 줄바꿈 대응).
+ * ================================================================== */
+:root { --head-h: 64px; }
+
+body.live-mode { overflow: hidden; }
+body.live-mode main#view-root { max-width: none; margin: 0; padding: 0; }
+
+.live-shell {
+  display: flex; flex-direction: column;
+  height: calc(100vh - var(--head-h));
+  min-height: 420px;
+}
+
+/* ── 상단 얇은 툴바 ── */
+.live-toolbar {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 12px;
+  background: #fff; border-bottom: 1px solid var(--line);
+}
+.live-toolbar select {
+  width: auto; min-width: 150px; max-width: 240px;
+  min-height: 44px; padding: 8px 12px; font-size: 1rem;
+}
+.live-toolbar .live-spacer { flex: 1 1 auto; }
+.live-toolbar .switch.live-free { min-height: 44px; padding: 0 6px; }
+.live-toolbar .switch.live-free .slider { width: 46px; height: 26px; }
+.live-toolbar .switch.live-free .slider::after { width: 20px; height: 20px; }
+.live-toolbar .switch.live-free input:checked + .slider::after { left: 23px; }
+.live-status { font-size: 0.92rem; font-weight: 700; color: var(--green-dark); min-width: 0; }
+.live-status.live-status-error { color: var(--red); }
+
+/* ── 본문: 좌 캔버스 + 우 모음 패널 ── */
+.live-body { flex: 1 1 auto; display: flex; min-height: 0; position: relative; }
+.live-canvas {
+  flex: 1 1 auto; min-width: 0; min-height: 0;
+  padding: 10px; overflow: auto; background: #e9edeb;
+  display: flex; justify-content: center; align-items: stretch;
+}
+body.live-mode .live-frame-wrap {
+  flex: 1 1 auto; width: 100%; height: 100%; min-height: 0;
+  border-radius: 10px; overflow: hidden;
+}
+body.live-mode .live-frame-wrap iframe { width: 100%; height: 100%; }
+body.live-mode .live-frame-wrap.mobile { flex: 0 0 390px; max-width: 390px; }
+
+/* ── 모음 패널 ── */
+.live-panel {
+  flex: 0 0 340px; width: 340px; min-width: 0;
+  display: flex; flex-direction: column;
+  background: #fff; border-left: 1px solid var(--line);
+  transition: flex-basis 0.15s, width 0.15s;
+}
+.live-panel.collapsed { flex-basis: 0; width: 0; border-left: 0; overflow: hidden; }
+.live-panel-head {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line);
+  font-size: 1rem; white-space: nowrap;
+}
+.live-panel-head .live-panel-close { min-height: 40px; padding: 0 12px; }
+.live-panel.pick-on { box-shadow: inset 0 0 0 3px var(--green); }
+
+.lib-note {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 10px 12px; font-size: 0.95rem; font-weight: 700; word-break: keep-all;
+}
+.lib-note-pick { background: var(--green-pale); color: var(--green-dark); }
+.lib-note-place { background: var(--amber-pale); color: var(--amber); }
+.lib-note button { min-height: 40px; padding: 0 12px; background: #fff; }
+
+.lib-tabs { flex: 0 0 auto; display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.lib-tab {
+  flex: 1; min-height: 44px; padding: 0 10px; border-radius: 999px;
+  border: 1.5px solid var(--line); background: #fff; color: var(--muted); font-weight: 600;
+}
+.lib-tab.active { border-color: var(--green); background: var(--green-pale); color: var(--green-dark); font-weight: 800; }
+
+.lib-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 12px 24px; }
+.lib-sec { font-size: 1rem; font-weight: 800; margin: 14px 0 8px; }
+.lib-subsec { font-size: 0.85rem; font-weight: 700; color: var(--muted); margin: 10px 0 6px; }
+.lib-empty { color: var(--muted); font-size: 0.92rem; padding: 12px 2px; word-break: keep-all; }
+
+.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; }
+.lib-card {
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  min-height: 44px; padding: 6px; text-align: left; font-size: 0.9rem;
+  border: 1.5px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer;
+}
+.lib-card:hover { border-color: var(--green); background: var(--green-pale); }
+.lib-card.chosen { border-color: var(--amber); background: var(--amber-pale); box-shadow: 0 0 0 2px var(--amber); }
+.lib-thumb { width: 100%; height: 78px; object-fit: cover; border-radius: 7px; background: #eef0ef; display: block; }
+.lib-thumb-empty {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 0.8rem;
+}
+.lib-label { font-weight: 700; font-size: 0.88rem; line-height: 1.35; word-break: keep-all; }
+.lib-meta { display: flex; gap: 4px; flex-wrap: wrap; font-size: 0.75rem; color: var(--muted); }
+.lib-meta .pill { font-size: 0.72rem; padding: 2px 7px; }
+
+.lib-drop {
+  border: 2px dashed var(--line); border-radius: 10px; background: #fafbfa;
+  min-height: 76px; display: flex; align-items: center; justify-content: center;
+  padding: 10px; text-align: center; cursor: pointer;
+}
+.lib-drop:hover, .lib-drop.drag-on { border-color: var(--green); background: var(--green-pale); }
+.lib-drop-hint { color: var(--muted); font-size: 0.9rem; font-weight: 600; word-break: keep-all; }
+
+/* ── 좁은 화면: 패널은 캔버스 위로 덮는 서랍이 된다 (기본 접힘) ── */
+@media (max-width: 1024px) {
+  .live-panel {
+    position: absolute; top: 0; right: 0; bottom: 0; z-index: 20;
+    flex-basis: auto; width: min(340px, 88vw);
+    box-shadow: -6px 0 20px rgba(20, 40, 30, 0.18);
+  }
+  .live-panel.collapsed { width: 0; box-shadow: none; }
+}
+@media (max-width: 700px) {
+  body.live-mode { overflow: auto; }
+  .live-shell { height: auto; }
+  .live-canvas { height: 70vh; padding: 6px; }
+  .live-toolbar { padding: 6px 8px; }
+  .live-toolbar select { max-width: 100%; flex: 1 1 140px; }
+  .live-toolbar .live-spacer { display: none; }
+  .live-panel { position: fixed; top: var(--head-h); width: min(340px, 92vw); }
+}
+
 /* ── 셸: 로그인 화면 + 앱 레이아웃 (index.html 정적 골격) ──────────── */
 .login-screen {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
@@ -432,7 +546,11 @@ button.pick-item:hover { border-color: var(--green); background: var(--green-pal
   border-radius: var(--radius); padding: 12px 14px; margin-bottom: 16px; font-weight: 700;
 }
 .login-foot { margin-top: 18px; text-align: center; color: var(--muted); font-size: 0.95rem; }
-.head-right { display: flex; align-items: center; gap: 10px; }
+.head-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+/* .head-email 은 .app-header 직속일 때만 한 줄 전체 — .head-right 안에서는 버튼을 밀어내면 안 된다
+   (QA 2026-07-22: 버튼 글자가 세로로 꺾이던 문제) */
+.head-right .head-email { width: auto; }
+.head-right button { white-space: nowrap; }
 .view-root { max-width: 860px; margin: 0 auto; padding: 24px 16px 80px; }
 @media (max-width: 640px) {
   .login-card { padding: 28px 18px; }

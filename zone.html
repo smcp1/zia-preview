@@ -8,7 +8,7 @@
             공통 메타정보
         ====================== -->
          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>지아한의원</title>
+        <title>진료 분야 글 모아보기 — 지아한의원</title>
         <link rel="canonical" href="https://stemexone.com">
         <link rel="icon" href="/zia-preview/static/images/favicon.png" type="image/png">
         <link rel="apple-touch-icon" href="/zia-preview/static/images/apple-touch-icon.png">
@@ -47,23 +47,27 @@
         <!-- //공통 스크립트 -->
 
         <!-- =====================
-            개별 : 글 상세 페이지 리소스 (P3-d)
-            본문 슬라이드 없음 — swiper 미로드.
-            내용은 cms-inject.js 가 v_public_post_detail 을 ?id= 로 조회해 채운다.
-            body_html 은 렌더 전 zia-sanitize.js 화이트리스트로 재-sanitize (이중 방어).
+            개별 : 분야(ZONE) 글 아카이브 리소스 (P3-g)
+            캐러셀 없음 — swiper 미로드 (그리드 + 더 보기 페이지네이션).
+            내용은 cms-inject.js 가 ?zone=<zones.slug> 로 조회해 채운다.
+            카드 마크업·클래스는 autonomic.html 의 .section-clinic-cases 원본을 그대로
+            재사용하므로(.clinic-page .clinic-case-area .case-swiper .case-card),
+            아래 style 은 "그리드 배치"에 필요한 최소 규칙만 정의한다 (원스 CSS 무수정).
         ====================== -->
         <link rel="stylesheet" href="/zia-preview/static/css/page/sub.css" />
         <style>
             /* ─────────────────────────────────────────────────────────────
-               헤더 가독성 — 히어로 없는 상태
+               헤더 가독성 — 히어로 없는 상태 (로딩·미발견)
                원스 헤더는 "히어로 이미지 위에 얹힌다"는 전제라 배경이 투명하고 글자·로고가
-               전부 흰색(#fff)이다. 글 상세는 로딩·미발견은 물론 본문까지 히어로가 전혀
-               없는 흰 배경이라, 흰 글씨 헤더가 통째로 사라진다(로고·메뉴·예약 버튼 실종).
-               → header 에 .no-hero 를 붙여 원스가 이미 쓰는 스크롤 헤더 스킨
-                 (흰 배경 + 짙은 글자)을 그대로 입힌다. 색값은 style.css 의
-                 header.is-scrolled / header.is-hovered 규칙과 동일 (새 색 도입 X).
+               전부 흰색(#fff)이다. 본문(#zone-main)에는 .clinic-page .section-visual 배경
+               사진이 깔려 문제가 없지만, 로딩·미발견 화면에는 히어로가 없어 흰 배경 위
+               흰 글씨가 되어 로고·메뉴·예약 버튼이 통째로 사라진다.
+               → 히어로가 보이지 않는 동안에만 header 에 .no-hero 를 붙여, 원스가 이미 쓰는
+                 스크롤 헤더 스킨(흰 배경 + 짙은 글자)을 그대로 입힌다.
+                 색값은 style.css 의 header.is-scrolled / header.is-hovered 규칙과 동일하며
+                 새 색을 도입하지 않는다 (원스 CSS 무수정).
                hover·스크롤·메뉴 열림 상태는 원스 규칙에 그대로 위임한다 (:not 으로 제외).
-               zone.html 과 동일 패턴 (zone 은 본문에 히어로가 있어 본문에서만 해제). */
+               post.html 과 동일 패턴. */
             header.header.no-hero:not(.is-hovered):not(.is-scrolled):not(.mobile-menu-open):not(.pc-menu-open) {
                 background-color: #fff;
                 box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
@@ -83,42 +87,38 @@
                 background-color: #2E3F66;
             }
 
-            /* 글 본문 머리말 위치 복구
-               style.css 의 전역 요소 규칙 header{position:fixed;top:0;height:100px;z-index:9999}
-               가 <header class="post-head"> 에도 걸려, 글 제목 줄이 사이트 헤더 위에 고정돼
-               헤더를 가려 버린다. 요소 선택자라 클래스로는 피할 수 없어 여기서 되돌린다
-               (원스 CSS 무수정 원칙). */
-            .post-page .post-head { position: static; top: auto; width: auto; height: auto; z-index: auto; transition: none; }
+            /* 상태 블록 (post.html .post-state 패턴 답습 — 동적 페이지 공통 UX) */
+            .zone-state { text-align: center; padding: 160px 20px 120px; color: #666; }
+            .zone-state .zone-state-title { font-size: 24px; font-weight: 700; color: #222; margin-bottom: 10px; }
+            .zone-state .zone-state-desc { font-size: 15px; margin-bottom: 28px; }
+            .zone-state .zone-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 26px; border: 1px solid #22344c; border-radius: 999px; color: #22344c; font-size: 15px; font-weight: 700; }
+            .zone-state .zone-btn:hover { background: #22344c; color: #fff; }
 
-            .post-page .section-post { padding: 140px 0 80px; }
-            .post-page .inner { max-width: 860px; margin: 0 auto; padding: 0 20px; }
-            .post-state { text-align: center; padding: 80px 0; color: #666; }
-            .post-state .post-state-title { font-size: 24px; font-weight: 700; color: #222; margin-bottom: 10px; }
-            .post-state .post-state-desc { font-size: 15px; margin-bottom: 28px; }
-            .post-head { border-bottom: 1px solid #e5e1da; padding-bottom: 24px; margin-bottom: 32px; }
-            .post-badge { display: inline-block; background: #22344c; color: #fff; font-size: 13px; font-weight: 700; border-radius: 999px; padding: 5px 14px; margin-bottom: 14px; }
-            .post-title { font-size: 30px; line-height: 1.35; font-weight: 800; color: #1c1c1c; word-break: keep-all; margin: 0 0 12px; }
-            .post-meta { font-size: 14px; color: #8a877f; display: flex; gap: 12px; flex-wrap: wrap; }
-            .post-body { font-size: 16px; line-height: 1.8; color: #333; word-break: keep-all; }
-            .post-body p { margin: 0 0 14px; }
-            .post-body h2 { font-size: 24px; font-weight: 800; color: #1c1c1c; margin: 34px 0 12px; }
-            .post-body h3 { font-size: 20px; font-weight: 700; color: #1c1c1c; margin: 28px 0 10px; }
-            .post-body h4 { font-size: 17px; font-weight: 700; color: #1c1c1c; margin: 22px 0 8px; }
-            .post-body img { max-width: 100%; height: auto; border-radius: 10px; display: block; margin: 18px auto; }
-            .post-body ul, .post-body ol { margin: 0 0 14px 22px; }
-            .post-body li { margin-bottom: 6px; }
-            .post-body blockquote { border-left: 4px solid #22344c; background: #f6f4f0; margin: 0 0 14px; padding: 14px 18px; border-radius: 0 10px 10px 0; }
-            .post-body a { color: #1a5c8a; text-decoration: underline; }
-            .post-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 40px; justify-content: center; }
-            .post-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 26px; border: 1px solid #22344c; border-radius: 999px; color: #22344c; font-size: 15px; font-weight: 700; transition: background 0.15s, color 0.15s; }
-            .post-btn:hover { background: #22344c; color: #fff; }
-            @media (max-width: 767px) {
-                .post-page .section-post { padding: 110px 0 60px; }
-                .post-title { font-size: 24px; }
-                .post-body { font-size: 15px; }
-                .post-body h2 { font-size: 21px; }
-                .post-body h3 { font-size: 18px; }
+            /* 글 그리드 — .case-swiper 클래스를 그대로 달아 카드 CSS(원스)를 상속받고,
+               레이아웃만 grid 로 덮어쓴다. 브레이크포인트는 사이트 기존 768/1200 답습. */
+            .clinic-page .clinic-case-area .case-swiper.zone-grid { overflow: visible; padding-bottom: 0; }
+            .zone-grid-list { display: grid; grid-template-columns: 1fr; gap: 20px; }
+            @media screen and (min-width: 768px) {
+                .zone-grid-list { grid-template-columns: repeat(2, 1fr); gap: 30px; }
             }
+            @media screen and (min-width: 1200px) {
+                .zone-grid-list { grid-template-columns: repeat(3, 1fr); gap: 40px; }
+            }
+            /* 카드 폭은 그리드 트랙에 맞춘다 (원스 고정폭 384px 오버플로 방지) */
+            .clinic-page .clinic-case-area .case-swiper.zone-grid .case-card { width: 100%; }
+            /* 아카이브는 제목 2줄까지 노출 (캐러셀 원본은 1줄 클램프) */
+            .clinic-page .clinic-case-area .case-swiper.zone-grid .case-card .info-overlay .title { -webkit-line-clamp: 2; }
+
+            /* 0건 / 더 보기 */
+            .zone-empty { text-align: center; color: #5A5652; background: rgba(255, 255, 255, 0.72); padding: 60px 20px; font-size: 15px; }
+            @media screen and (min-width: 1200px) { .zone-empty { font-size: 16px; padding: 80px 20px; } }
+            .zone-more-area { display: flex; justify-content: center; margin-top: 32px; }
+            @media screen and (min-width: 1200px) { .zone-more-area { margin-top: 48px; } }
+            .zone-more-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 32px; border: 1px solid #5A5652; border-radius: 48px; background: rgba(255, 255, 255, 0.9); color: #5A5652; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+            .zone-more-btn:hover { background: #B79A78; border-color: #B79A78; color: #fff; }
+            .zone-more-btn[disabled] { opacity: 0.6; cursor: default; }
+            .zone-intro-link-area { text-align: center; margin-top: 10px; }
+            .zone-intro-link { display: inline-flex; align-items: center; min-height: 40px; color: #B79A78; font-size: 15px; font-weight: 600; text-decoration: underline; }
         </style>
         <script>
             $(document).ready(function(){
@@ -129,11 +129,8 @@
     </head>
     <body>
 
-        <!-- =====================
-            공통 : header
-        ====================== -->
-        <!-- no-hero = 히어로 없는 화면용 헤더 스킨. 글 상세는 전 상태가 흰 배경이라
-             기본값으로 켜 둔다 (아래 인라인 스크립트가 상태를 계속 동기화). -->
+        <!-- no-hero = 히어로 없는 상태(로딩·미발견)용 헤더 스킨. 기본값으로 켜 두고
+             (첫 화면 = 로딩) 본문이 뜨는 순간 아래 인라인 스크립트가 떼어낸다 — 깜빡임 0. -->
         <header class="header no-hero">
             <div class="header-inner">
                 <h1>
@@ -375,45 +372,72 @@
         </header>
         <!-- //header  -->
 
-
-
         <!-- =====================
-            개별 : 글 상세 (P3-d — cms-inject.js 가 채움)
+            개별 : 분야(ZONE) 글 아카이브 (P3-g — cms-inject.js 가 채움)
+            URL 규약: zone.html?zone=<zones.slug>  (slug = 안정 식별자, 라벨 아님)
         ====================== -->
-        <div class="container post-page">
-            <section class="section section-post">
-                <div class="inner">
-                    <!-- 불러오는 중 (기본 표시) -->
-                    <div id="post-loading" class="post-state">
-                        <p>글을 불러오고 있어요&hellip;</p>
+        <div class="container clinic-page zone-page">
+            <!-- 불러오는 중 (기본 표시) -->
+            <div id="zone-loading" class="zone-state">
+                <p>글을 불러오고 있어요&hellip;</p>
+            </div>
+
+            <!-- 잘못된 분야 주소 / 조회 실패 -->
+            <div id="zone-notfound" class="zone-state" style="display:none;">
+                <p class="zone-state-title">진료 분야를 찾을 수 없습니다</p>
+                <p class="zone-state-desc">주소가 잘못되었거나, 해당 분야가 내려갔을 수 있어요.</p>
+                <a href="/zia-preview/" class="zone-btn">홈으로 가기</a>
+            </div>
+
+            <!-- 분야 아카이브 본문 -->
+            <div id="zone-main" style="display:none;">
+                <!-- 분야 비주얼 영역 (Z1) -->
+                <section class="section section-visual">
+                    <div class="inner text-center">
+                        <h2 class="title" id="zone-title"></h2>
+                        <p class="desc" id="zone-desc"></p>
+                    </div>
+                </section>
+                <!-- //분야 비주얼 영역 -->
+
+                <!-- 분야 글 목록 (Z2 태그 필터 + Z3 그리드·더 보기) -->
+                <section class="section section-clinic-cases">
+                    <div class="inner text-center">
+                        <span class="sub-title" id="zone-eng"></span>
+                        <h3 class="main-title">이 분야의 <strong>글 모아보기</strong></h3>
                     </div>
 
-                    <!-- 데이터 없음/실패 -->
-                    <div id="post-notfound" class="post-state" style="display:none;">
-                        <p class="post-state-title">글을 찾을 수 없습니다</p>
-                        <p class="post-state-desc">주소가 잘못되었거나, 글이 내려갔을 수 있어요.</p>
-                        <div class="post-actions">
-                            <a href="/zia-preview/" class="post-btn">홈으로 가기</a>
-                        </div>
+                    <p class="txt-sub" id="zone-subtxt"></p>
+                    <div class="zone-intro-link-area">
+                        <a href="#" class="zone-intro-link" id="zone-intro-link" style="display:none;">분야 소개 페이지 보기</a>
                     </div>
 
-                    <!-- 글 본문 -->
-                    <article id="post-article" class="post-detail" style="display:none;">
-                        <header class="post-head">
-                            <span class="post-badge" id="post-badge" style="display:none;"></span>
-                            <h2 class="post-title" id="post-title"></h2>
-                            <p class="post-meta"><span id="post-zone"></span><span id="post-date"></span></p>
-                        </header>
-                        <div class="post-body" id="post-body"></div>
-                        <div class="post-actions">
-                            <a id="post-external" class="post-btn" style="display:none;" target="_blank" rel="noopener">블로그 원문 보기</a>
-                            <a id="post-back" class="post-btn" href="/zia-preview/">목록으로</a>
+                    <div class="clinic-case-area">
+                        <div class="area-header">
+                            <!-- 카테고리 (태그 필터) -->
+                            <ul class="tag-list" id="zone-tags"></ul>
+                            <!-- //카테고리 -->
                         </div>
-                    </article>
-                </div>
-            </section>
+
+                        <!-- 글 그리드 (누적 무제한 — 12개씩 추가 로드) -->
+                        <div class="case-swiper zone-grid">
+                            <div class="zone-grid-list" id="zone-grid"></div>
+                        </div>
+                        <!-- //글 그리드 -->
+
+                        <!-- 0건 상태 -->
+                        <div class="zone-empty" id="zone-empty" style="display:none;">아직 등록된 글이 없어요.</div>
+
+                        <!-- 더 보기 -->
+                        <div class="zone-more-area" id="zone-more-area" style="display:none;">
+                            <button type="button" class="zone-more-btn" id="zone-more">더 보기</button>
+                        </div>
+                    </div>
+                </section>
+                <!-- //분야 글 목록 -->
+            </div>
         </div>
-        <!-- //글 상세 -->
+        <!-- //분야 글 아카이브 -->
 
 
 
@@ -549,26 +573,25 @@
         <script src="/zia-preview/static/js/page_obj_show_motion.js"></script>
         <!-- //페이지 콘텐츠 보이기 모션 -->
 
-        <!-- 유입경로 분기(crm/ad/blog) + CTA 중앙 설정 + 본문 sanitize -->
+        <!-- 유입경로 분기(crm/ad/blog) + CTA 중앙 설정 -->
         <script src="/zia-preview/static/js/site-config.js"></script>
         <script src="/zia-preview/static/js/channel.js"></script>
-        <script src="/zia-preview/static/js/zia-sanitize.js"></script>
         <script src="/zia-preview/static/js/cms-inject.js"></script>
         <script src="/zia-preview/static/js/edit-overlay.js"></script>
         <!-- //유입경로 분기 -->
 
         <!-- =====================
-            개별 : 헤더 스킨 토글 (히어로 유무 추적) — zone.html 과 동일 패턴
-            글 상세는 로딩·미발견·본문 어느 상태에도 히어로가 없으므로 HERO_ID = null
-            (= .no-hero 상시 유지). 코드 형태는 zone.html 과 동일하게 맞춘다.
+            개별 : 헤더 스킨 토글 (히어로 유무 추적) — post.html 과 동일 패턴
+            cms-inject.js 가 상태 컨테이너의 display 를 갈아끼우므로 MutationObserver 로
+            추적한다 (외부 JS·원스 CSS 무수정).
             ⚠ 위치 고정: 반드시 body 최하단(스크립트 묶음 안). sub.css 의
-              `.<페이지> + .bottom-banner { padding: … !important }` 가 인접 형제
-              선택자라, .container 와 .bottom-banner 사이에 엘리먼트를 끼우면
-              하단 배너 여백이 어긋난다 (zone.html 에서 실측 확인).
+              `.clinic-page + .bottom-banner { padding: … !important }` 가 인접 형제
+              선택자라, .container 와 .bottom-banner 사이에 어떤 엘리먼트든 끼우면
+              하단 배너 여백이 100px → 160px 로 어긋난다 (실측 확인).
         ====================== -->
         <script>
             (function () {
-                var HERO_ID = null; // 히어로 배경을 품은 컨테이너 없음 (글 상세는 전 상태 흰 배경)
+                var HERO_ID = 'zone-main'; // 히어로 배경(.section-visual)을 품은 컨테이너
                 var header = document.querySelector('header.header');
                 var hero = HERO_ID ? document.getElementById(HERO_ID) : null;
                 if (!header) { return; }

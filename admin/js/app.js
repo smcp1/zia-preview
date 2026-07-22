@@ -31,10 +31,12 @@
     byId("login-form").addEventListener("submit", onLoginSubmit);
     byId("btn-logout").addEventListener("click", onLogout);
     byId("btn-password").addEventListener("click", function () { location.hash = "#/password"; });
-    byId("btn-brand").addEventListener("click", function () { location.hash = "#/"; });
+    byId("btn-brand").addEventListener("click", function () { location.hash = "#/live"; });
     window.addEventListener("hashchange", render);
-    // P3-e: #/live iframe(수정 모드 배지 클릭) → 편집 화면 이동. origin 검증 + hash 화이트리스트.
-    window.addEventListener("message", onEditNavMessage);
+    // P3-e/P3-f: 미리보기(iframe) ↔ 관리자 메시지 창구 단일화. origin 검증은 핸들러 첫 줄.
+    window.addEventListener("message", onFrameMessage);
+    // 전폭 라이브 화면은 헤더 높이를 빼서 세로를 꽉 채운다 — 헤더가 줄바꿈되면 다시 잰다.
+    window.addEventListener("resize", syncHeaderHeight);
 
     sb.auth.getSession().then(function (res) {
       state.session = res.data ? res.data.session : null;
@@ -56,6 +58,8 @@
     } else {
       byId("app-screen").classList.add("hidden");
       byId("login-screen").classList.remove("hidden");
+      document.body.classList.remove("live-mode"); // 로그아웃 시 전폭 레이아웃 해제
+      root().innerHTML = "";
       var pw = byId("login-password");
       if (pw) pw.value = "";
     }
@@ -136,14 +140,63 @@
   /* ════════════════════════ P3-e 홈페이지 보며 수정 — 공용 상수·헬퍼 ════════════════════════ */
 
   // #/live 페이지 선택 목록 (site/*.html — post.html 은 ?id 필요라 제외)
+  // key = select 값 겸 hash 의 page 파라미터(안정 식별자), file+query = 실제 주소.
   var LIVE_PAGES = [
-    { file: "index.html",     label: "홈" },
-    { file: "about.html",     label: "의원소개" },
-    { file: "autonomic.html", label: "자율신경계" },
-    { file: "reviews.html",   label: "치료후기" },
-    { file: "faq.html",       label: "자주 묻는 질문(FAQ)" },
-    { file: "location.html",  label: "오시는길" }
+    { key: "index.html",     file: "index.html",     label: "홈" },
+    { key: "about.html",     file: "about.html",     label: "의원소개" },
+    { key: "autonomic.html", file: "autonomic.html", label: "자율신경계" },
+    { key: "reviews.html",   file: "reviews.html",   label: "치료후기" },
+    { key: "faq.html",       file: "faq.html",       label: "자주 묻는 질문(FAQ)" },
+    { key: "location.html",  file: "location.html",  label: "오시는길" }
   ];
+
+  // 분야(ZONE) 아카이브 페이지 — site/zone.html?zone=<slug> (다른 담당자가 신설 중).
+  // ⚠ 파일이 아직 없을 수 있다 → HEAD 로 한 번 확인해서 있을 때만 목록에 붙인다.
+  //    없거나 확인 실패면 조용히 건너뛴다 (원장 화면에 오류를 띄우지 않는다).
+  var liveZonePages = null;   // null = 아직 확인 전, [] = 없음/실패
+  var liveZonePagesJob = null;
+
+  function loadZonePages() {
+    if (liveZonePages) return Promise.resolve(liveZonePages);
+    if (liveZonePagesJob) return liveZonePagesJob;
+    liveZonePagesJob = fetch("../zone.html", { method: "HEAD" })
+      .then(function (res) {
+        if (!res.ok) return [];
+        return loadZones().then(function (zones) {
+          return (zones || []).filter(function (z) { return z.is_visible && z.slug; }).map(function (z) {
+            return {
+              key: "zone.html?zone=" + z.slug,
+              file: "zone.html",
+              query: "zone=" + encodeURIComponent(z.slug),
+              label: "분야 · " + (z.name || z.slug)
+            };
+          });
+        });
+      })
+      .catch(function () { return []; })   // 파일 부재·네트워크 실패 → 조용히 없음 처리
+      .then(function (list) { liveZonePages = list || []; return liveZonePages; });
+    return liveZonePagesJob;
+  }
+
+  function livePages() {
+    return LIVE_PAGES.concat(liveZonePages || []);
+  }
+
+  // page 파라미터 → 목록 항목. 목록에 아직 없어도 분야 페이지 형식이면 즉석 항목을 만든다
+  // (딥링크가 목록 로딩보다 먼저 와도 동작하게).
+  function livePageByKey(key) {
+    var found = livePages().find(function (p) { return p.key === key; });
+    if (found) return found;
+    var m = /^zone\.html\?zone=([a-z0-9_-]{1,64})$/.exec(key || "");
+    if (m) return { key: key, file: "zone.html", query: "zone=" + m[1], label: "분야 페이지" };
+    return LIVE_PAGES[0];
+  }
+
+  function livePageSrc(page, focus) {
+    // 사이트는 같은 오리진 한 단계 위 — 상대경로라 스테이징 서브패스·프로덕션 모두 동작
+    return "../" + page.file + "?" + (page.query ? page.query + "&" : "") +
+      "edit=1" + (focus ? "&focus=" + focus : "");
+  }
 
   // 편집 화면 → 대표 focus 지점 (edit-overlay.js focus 딥링크 규약 — 계약 v1.2 §8.4)
   // note = 각 편집 화면 상단 "어디에 보이나요?" 1줄 안내.
@@ -159,17 +212,55 @@
   // 배지 postMessage hash 화이트리스트 (LIVE_FOCUS 키와 동일 화면 셋)
   var EDIT_NAV_HASHES = ["#/settings", "#/zones", "#/home", "#/posts", "#/faqs", "#/reviews"];
 
-  function onEditNavMessage(e) {
-    if (e.origin !== window.location.origin) return; // 같은 오리진 배포 전제 — 외부 메시지 차단
+  // 미리보기(iframe) → 관리자 메시지 창구 (계약 v2 §6). origin 검증이 첫 줄 — 외부 메시지 차단.
+  function onFrameMessage(e) {
+    if (e.origin !== window.location.origin) return; // 같은 오리진 배포 전제
     var d = e.data;
-    if (!d || d.type !== "zia-edit-nav" || typeof d.hash !== "string") return;
-    if (EDIT_NAV_HASHES.indexOf(d.hash) === -1) return;
-    location.hash = d.hash;
+    if (!d || typeof d.type !== "string") return;
+    if (d.type === "zia-edit-nav") {
+      if (typeof d.hash !== "string" || EDIT_NAV_HASHES.indexOf(d.hash) === -1) return;
+      location.hash = d.hash;
+      return;
+    }
+    if (!isLiveFrame(e.source)) return; // 나머지는 현재 띄운 미리보기에서 온 것만 처리
+    if (d.type === "zia-edit-ready") onEditReady(d);
+    else if (d.type === "zia-edit-save") onEditSave(d);
+    else if (d.type === "zia-edit-pick") onEditPick(d);
+  }
+
+  function liveFrame() { return byId("live-frame"); }
+
+  function isLiveFrame(source) {
+    var f = liveFrame();
+    try { return !!(f && source && f.contentWindow === source); } catch (err) { return false; }
+  }
+
+  // 관리자 → 미리보기 (계약 v2 §6 부모→자식)
+  function sendToFrame(type, payload) {
+    var f = liveFrame();
+    if (!f || !f.contentWindow) return;
+    var msg = { type: type };
+    Object.keys(payload || {}).forEach(function (k) { msg[k] = payload[k]; });
+    try { f.contentWindow.postMessage(msg, window.location.origin); } catch (err) { /* 무해 */ }
   }
 
   function liveHash(screenKey) {
     var t = LIVE_FOCUS[screenKey];
     return t ? "#/live?page=" + t.page + "&focus=" + t.focus : "#/live";
+  }
+
+  // 목록 화면에서 내용을 바꾸면 표시해 두었다가, 미리보기로 돌아왔을 때 다시 불러오게 한다.
+  var liveNeedsRefresh = false;
+  function markDataChanged() {
+    liveNeedsRefresh = true;
+    if (typeof libCache !== "undefined") { libCache.photo = null; libCache.post = null; libCache.review = null; }
+  }
+
+  // 헤더 높이(줄바꿈 대응) → CSS 변수. 전폭 라이브 화면의 세로 높이 계산에 쓴다.
+  function syncHeaderHeight() {
+    var head = document.querySelector(".app-header");
+    if (!head) return;
+    document.documentElement.style.setProperty("--head-h", head.offsetHeight + "px");
   }
 
   // 각 편집 화면 상단 "어디에 보이나요?" 안내 줄 (+ 홈페이지에서 보기)
@@ -182,6 +273,7 @@
 
   // 저장 성공 토스트 + "홈페이지에서 확인하기" 버튼 → #/live (해당 페이지 + focus 지점)
   function toastView(message, screenKey) {
+    markDataChanged(); // 저장 성공 시점 — 미리보기로 돌아가면 새로 불러온다
     toast(message, null, 6000); // 버튼 누를 시간 확보 (ui.js holdMs)
     var el = byId("toast");
     if (!el || !LIVE_FOCUS[screenKey]) return;
@@ -338,8 +430,11 @@
     if (!state.session) return;
     var h = location.hash || "#/";
     var m;
-    if (h === "#/" || h === "" || h === "#") viewDashboard();
+    // P3-f: 기본 진입 = "홈페이지 보며 수정". 메뉴판(대시보드)은 #/manage 로 내려간다.
+    document.body.classList.remove("live-mode");
+    if (h === "#/" || h === "" || h === "#") viewLive("");
     else if ((m = h.match(/^#\/live(?:\?(.*))?$/))) viewLive(m[1] || "");
+    else if (h === "#/manage") viewDashboard();
     else if (h === "#/zones") viewZones();
     else if (h === "#/home") viewHome();
     else if (h === "#/posts") viewPosts();
@@ -353,7 +448,7 @@
     else if ((m = h.match(/^#\/reviews\/(\d+)$/))) viewReviewEdit(Number(m[1]));
     else if (h === "#/settings") viewSettings();
     else if (h === "#/password") viewPassword();
-    else viewDashboard();
+    else viewLive("");
     window.scrollTo(0, 0);
   }
 
@@ -378,16 +473,15 @@
     });
   }
 
-  /* ════════════════════════ 홈 대시보드 ════════════════════════ */
+  /* ════════════════════════ 자세히 관리 (메뉴판 — #/manage) ════════════════════════ */
 
+  // P3-f: 첫 화면에서 내려온 메뉴판. 기능은 그대로 — 라이브 화면 툴바 "자세히 관리"로 들어온다.
   function viewDashboard() {
     root().innerHTML =
-      '<h1 class="view-title">무엇을 할까요?</h1>' +
-      '<p class="view-desc">바꾸고 싶은 항목을 눌러 주세요.</p>' +
+      backLink("#/live", "홈페이지 보며 수정으로") +
+      '<h1 class="view-title">자세히 관리</h1>' +
+      '<p class="view-desc">홈페이지에서 바로 고치기 어려운 것(발행·순서·묶음 관리)은 여기서 해요.</p>' +
       '<div class="dash-grid">' +
-      '<a href="#/live" class="dash-card dash-card-live" data-nav="#/live">' +
-      '<div class="dash-icon">👀</div>' +
-      "<h2>홈페이지 보며 수정</h2><p>실제 홈페이지를 띄워 놓고, 바꾸고 싶은 곳의 배지를 눌러 바로 고쳐요 &mdash; 처음이라면 여기부터!</p></a>" +
       dashCard("#/zones", "분", "진료 분야 관리", "홈페이지에 보여줄 진료 분야를 켜고 끕니다") +
       dashCard("#/home", "홈", "홈 화면 관리", "홈 첫 화면 칸에 보여줄 글을 골라 담습니다") +
       dashCard("#/posts", "글", "글 관리", "블로그 글을 붙여넣어 올리고 고칩니다") +
@@ -395,6 +489,7 @@
       dashCard("#/reviews", "후", "후기 관리", "후기 카드를 쓰고 발행합니다") +
       dashCard("#/settings", "정", "병원 정보", "전화번호·진료시간·주소를 바꿉니다") +
       "</div>";
+    bindNav(root());
     root().querySelectorAll(".dash-card").forEach(function (card) {
       card.addEventListener("click", function (e) {
         e.preventDefault();
@@ -409,45 +504,57 @@
       "<h2>" + esc(title) + "</h2><p>" + esc(desc) + "</p></a>";
   }
 
-  /* ════════════════════════ 홈페이지 보며 수정 (#/live — P3-e) ════════════════════════ */
+  /* ════════════════════════ 홈페이지 보며 수정 (#/live — P3-f 전폭 캔버스) ════════════════════════ */
 
-  var liveDevice = "pc"; // PC/모바일 폭 토글 상태 유지 (세션 내)
+  var liveDevice = "pc";        // PC/휴대폰 폭 토글 (세션 내 유지)
+  var liveFreeEdit = false;     // "아무 곳이나 고치기" — 기본 꺼짐 (실수 방지, 계약 §7)
+  var livePanelOpen = null;     // null = 아직 안 정함 → 넓은 화면이면 펼침
 
-  // hash 예: #/live?page=faq.html&focus=F2 — page 는 LIVE_PAGES 화이트리스트, focus 는 지점ID 형식만
+  // hash 예: #/live?page=faq.html&focus=F2 — focus 는 지점ID 형식만 허용
   function viewLive(query) {
     var params = {};
     (query || "").split("&").forEach(function (kv) {
       var i = kv.indexOf("=");
       if (i > 0) params[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1));
     });
-    var page = LIVE_PAGES.some(function (p) { return p.file === params.page; }) ? params.page : "index.html";
+    var page = livePageByKey(params.page);
     var focus = /^[A-Za-z0-9_]{1,24}$/.test(params.focus || "") ? params.focus : "";
-    // 사이트는 같은 오리진 한 단계 위 — 상대경로라 스테이징 서브패스·프로덕션 모두 동작
-    var src = "../" + page + "?edit=1" + (focus ? "&focus=" + focus : "");
+    var src = livePageSrc(page, focus);
+    // 새 창은 "손님이 보는 그대로" — 수정 표시 없이 연다 (새 창은 저장 창구가 없다)
+    var plainSrc = "../" + page.file + (page.query ? "?" + page.query : "");
+    if (livePanelOpen === null) livePanelOpen = window.innerWidth > 1024;
+
+    document.body.classList.add("live-mode");
+    syncHeaderHeight();
 
     root().innerHTML =
-      backLink("#/", "처음으로") +
-      '<h1 class="view-title">홈페이지 보며 수정</h1>' +
-      '<p class="view-desc">아래는 실제 홈페이지예요. 색 테두리가 쳐진 곳이 바꿀 수 있는 부분이고, ' +
-      "<b>&#9999;&#65039; 배지를 누르면</b> 그 부분을 고치는 화면으로 바로 이동해요.</p>" +
-      '<div class="live-bar">' +
-      '<select id="live-page" aria-label="보고 있는 페이지">' +
-      LIVE_PAGES.map(function (p) {
-        return '<option value="' + esc(p.file) + '"' + (p.file === page ? " selected" : "") + ">" + esc(p.label) + "</option>";
-      }).join("") +
-      "</select>" +
+      '<div class="live-shell">' +
+      '<div class="live-toolbar">' +
+      '<select id="live-page" aria-label="보고 있는 홈페이지 화면">' + livePageOptions(page.key) + "</select>" +
       '<div class="live-device" role="group" aria-label="화면 폭">' +
       '<button type="button" id="live-pc" class="live-dev-btn' + (liveDevice === "pc" ? " active" : "") + '">PC 화면</button>' +
       '<button type="button" id="live-mobile" class="live-dev-btn' + (liveDevice === "mobile" ? " active" : "") + '">휴대폰 화면</button>' +
       "</div>" +
+      '<label class="switch live-free" title="켜면 홈페이지의 아무 글자·사진이나 눌러서 고칠 수 있어요.">' +
+      '<input type="checkbox" id="live-free"' + (liveFreeEdit ? " checked" : "") + ">" +
+      '<span class="slider"></span><span class="switch-label">아무 곳이나 고치기</span></label>' +
+      '<span class="live-status" id="live-status" role="status"></span>' +
+      '<span class="live-spacer"></span>' +
       '<button type="button" class="btn-ghost btn-sm" id="live-open">새 창에서 열기</button>' +
+      '<button type="button" class="btn-secondary btn-sm" id="live-manage">자세히 관리</button>' +
+      '<button type="button" class="btn-secondary btn-sm" id="live-panel-btn">사진·글 모음</button>' +
       "</div>" +
+      '<div class="live-body">' +
+      '<div class="live-canvas">' +
       '<div id="live-wrap" class="live-frame-wrap' + (liveDevice === "mobile" ? " mobile" : "") + '">' +
-      '<iframe id="live-frame" src="' + esc(src) + '" title="홈페이지 미리보기"></iframe></div>';
+      '<iframe id="live-frame" src="' + esc(src) + '" title="홈페이지 미리보기"></iframe></div>' +
+      "</div>" +
+      libraryPanelHtml() +
+      "</div></div>";
     bindNav(root());
 
     byId("live-page").addEventListener("change", function () {
-      location.hash = "#/live?page=" + this.value; // 페이지 전환 시 focus 는 해제 (재렌더)
+      location.hash = "#/live?page=" + encodeURIComponent(this.value); // 화면 전환 시 focus 해제
     });
     function setDevice(mode) {
       liveDevice = mode;
@@ -458,8 +565,640 @@
     byId("live-pc").addEventListener("click", function () { setDevice("pc"); });
     byId("live-mobile").addEventListener("click", function () { setDevice("mobile"); });
     byId("live-open").addEventListener("click", function () {
-      window.open(src, "_blank", "noopener"); // 상대경로 — 현 문서(admin/) 기준 해석
+      window.open(plainSrc, "_blank", "noopener"); // 상대경로 — 현 문서(admin/) 기준 해석
     });
+    byId("live-manage").addEventListener("click", function () { location.hash = "#/manage"; });
+    byId("live-panel-btn").addEventListener("click", function () { setPanelOpen(!livePanelOpen); });
+    byId("live-free").addEventListener("change", function () {
+      liveFreeEdit = this.checked;
+      sendToFrame("zia-edit-mode", { freeEdit: liveFreeEdit });
+      liveStatus(liveFreeEdit
+        ? "이제 홈페이지의 아무 곳이나 눌러서 고칠 수 있어요"
+        : "정해 둔 곳만 고칠 수 있어요");
+    });
+
+    bindLibraryPanel();
+    setPanelOpen(livePanelOpen);
+
+    // 분야(ZONE) 화면 목록은 늦게 도착할 수 있다 → 도착하면 선택 목록만 조용히 갱신
+    loadZonePages().then(function () {
+      var sel = byId("live-page");
+      if (!sel) return;
+      var keep = sel.value;
+      sel.innerHTML = livePageOptions(keep);
+    }).catch(function () { /* 조용히 무시 */ });
+  }
+
+  function livePageOptions(selectedKey) {
+    return livePages().map(function (p) {
+      return '<option value="' + esc(p.key) + '"' + (p.key === selectedKey ? " selected" : "") +
+        ">" + esc(p.label) + "</option>";
+    }).join("");
+  }
+
+  // 툴바 오른쪽 상태 문구 (전문용어 금지 — 원장이 읽는 말)
+  var liveStatusTimer = null;
+  function liveStatus(message, isError) {
+    var el = byId("live-status");
+    if (!el) return;
+    el.textContent = message || "";
+    el.className = "live-status" + (isError ? " live-status-error" : "");
+    clearTimeout(liveStatusTimer);
+    if (message) liveStatusTimer = setTimeout(function () {
+      if (byId("live-status") === el) { el.textContent = ""; el.className = "live-status"; }
+    }, 4000);
+  }
+
+  function setPanelOpen(open) {
+    livePanelOpen = !!open;
+    var panel = byId("live-panel");
+    var btn = byId("live-panel-btn");
+    if (panel) panel.classList.toggle("collapsed", !livePanelOpen);
+    if (btn) btn.textContent = livePanelOpen ? "모음 접기" : "사진·글 모음";
+    var shell = root().querySelector(".live-shell");
+    if (shell) shell.classList.toggle("panel-open", livePanelOpen);
+  }
+
+  /* ── 미리보기가 보내는 신호 (계약 v2 §6 자식→부모) ── */
+
+  function onEditReady() {
+    sendToFrame("zia-edit-mode", { freeEdit: liveFreeEdit });
+    if (liveNeedsRefresh) {
+      liveNeedsRefresh = false;
+      sendToFrame("zia-edit-refresh", {});
+    }
+  }
+
+  /* ════════════════════════ 사진·글·후기 모음 패널 (P3-f) ════════════════════════ */
+
+  var LIB_TABS = [
+    { key: "photo",  label: "사진" },
+    { key: "post",   label: "글" },
+    { key: "review", label: "후기" }
+  ];
+  var libTab = "photo";
+  var libCache = { photo: null, post: null, review: null };  // null = 아직 안 불러옴
+  var libPick = null;      // 미리보기가 요청한 고르기 { reqId, accept, slot }
+  var libPlacing = null;   // 상시 모드에서 고른 항목 (어디에 넣을지 기다리는 중)
+
+  function libraryPanelHtml() {
+    return '<aside class="live-panel' + (livePanelOpen ? "" : " collapsed") + '" id="live-panel" aria-label="사진·글·후기 모음">' +
+      '<div class="live-panel-head">' +
+      '<strong>사진 · 글 · 후기 모음</strong>' +
+      '<button type="button" class="btn-ghost btn-sm live-panel-close" id="live-panel-close" aria-label="모음 닫기">닫기</button>' +
+      "</div>" +
+      '<div class="lib-note hidden" id="lib-note"></div>' +
+      '<div class="lib-tabs" role="group" aria-label="모음 종류">' +
+      LIB_TABS.map(function (t) {
+        return '<button type="button" class="lib-tab' + (t.key === libTab ? " active" : "") +
+          '" data-tab="' + t.key + '">' + esc(t.label) + "</button>";
+      }).join("") + "</div>" +
+      '<div class="lib-body" id="lib-body"></div>' +
+      "</aside>";
+  }
+
+  function bindLibraryPanel() {
+    var panel = byId("live-panel");
+    if (!panel) return;
+    byId("live-panel-close").addEventListener("click", function () {
+      if (libPick) cancelPick();
+      setPanelOpen(false);
+    });
+    panel.querySelectorAll(".lib-tab").forEach(function (btn) {
+      btn.addEventListener("click", function () { setLibTab(btn.getAttribute("data-tab")); });
+    });
+    drawLibNote();
+    drawLibBody();
+  }
+
+  function setLibTab(tab) {
+    libTab = tab;
+    var panel = byId("live-panel");
+    if (panel) panel.querySelectorAll(".lib-tab").forEach(function (b) {
+      b.classList.toggle("active", b.getAttribute("data-tab") === tab);
+    });
+    drawLibBody();
+  }
+
+  // 패널 위쪽 안내 줄 (고르기 요청 중 / 넣을 자리 기다리는 중)
+  function drawLibNote() {
+    var el = byId("lib-note");
+    if (!el) return;
+    if (libPick) {
+      el.className = "lib-note lib-note-pick";
+      el.innerHTML = '<span>' + esc(libPick.slotLabel || "넣을 것을 골라 주세요") + "</span>" +
+        '<button type="button" class="btn-ghost btn-sm" id="lib-cancel">그만두기</button>';
+      byId("lib-cancel").addEventListener("click", cancelPick);
+    } else if (libPlacing) {
+      el.className = "lib-note lib-note-place";
+      el.innerHTML = '<span>어디에 넣을까요? 홈페이지에서 넣고 싶은 자리를 눌러 주세요.</span>' +
+        '<button type="button" class="btn-ghost btn-sm" id="lib-cancel">그만두기</button>';
+      byId("lib-cancel").addEventListener("click", cancelPlacing);
+    } else {
+      el.className = "lib-note hidden";
+      el.innerHTML = "";
+    }
+  }
+
+  function drawLibBody() {
+    var box = byId("lib-body");
+    if (!box) return;
+    var cached = libCache[libTab];
+    if (cached) { renderLibItems(box, cached); return; }
+    box.innerHTML = '<p class="lib-empty">불러오는 중이에요…</p>';
+    loadLibTab(libTab).then(function (items) {
+      libCache[libTab] = items;
+      if (libTab && byId("lib-body") === box) renderLibItems(box, items);
+    }).catch(function (err) {
+      console.error("[admin] 모음 불러오기 실패:", err);
+      box.innerHTML = '<p class="lib-empty">목록을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.</p>';
+    });
+  }
+
+  function loadLibTab(tab) {
+    if (tab === "photo") return loadPhotoLibrary();
+    if (tab === "post") {
+      return Promise.all([
+        loadZones(),
+        sb.from("posts").select("id, title, zone_id, thumbnail_path, published, home_slot, badge")
+          .order("sort_order").order("id").then(function (res) {
+            if (res.error) throw res.error;
+            return res.data || [];
+          })
+      ]).then(function (r) { return r[1]; });
+    }
+    return sb.from("reviews").select("id, title, body, labels, thumbnail_path, published, is_highlight")
+      .order("sort_order").order("id").then(function (res) {
+        if (res.error) throw res.error;
+        return res.data || [];
+      });
+  }
+
+  /* ── 사진 모음 ── */
+
+  var STORAGE_FOLDER_LABEL = { posts: "글 사진", zones: "분야 사진", reviews: "후기 사진", home: "홈 사진" };
+
+  // zia-media 보관함 목록 (폴더 재귀 — 실제 폴더는 posts/zones/reviews 수준이라 2단이면 충분)
+  function listStorageImages(prefix, depth) {
+    return sb.storage.from("zia-media").list(prefix || "", { limit: 200, sortBy: { column: "created_at", order: "desc" } })
+      .then(function (res) {
+        if (res.error) throw res.error;
+        var files = [];
+        var jobs = [];
+        (res.data || []).forEach(function (o) {
+          if (!o || !o.name || o.name === ".emptyFolderPlaceholder") return;
+          var full = prefix ? prefix + "/" + o.name : o.name;
+          var isFolder = !o.id && !o.metadata;
+          if (isFolder) {
+            if (depth > 0) jobs.push(listStorageImages(full, depth - 1).catch(function () { return []; }));
+          } else if (/\.(jpe?g|png|gif|webp|avif|bmp)$/i.test(o.name)) {
+            files.push({
+              type: "photo", path: full,
+              label: (STORAGE_FOLDER_LABEL[prefix] || "올린 사진") + (o.created_at ? " · " + shortDate(o.created_at) : ""),
+              at: o.created_at || ""
+            });
+          }
+        });
+        return Promise.all(jobs).then(function (subs) {
+          subs.forEach(function (s) { files = files.concat(s); });
+          return files;
+        });
+      });
+  }
+
+  function shortDate(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return d.getFullYear() + "." + ("0" + (d.getMonth() + 1)).slice(-2) + "." + ("0" + d.getDate()).slice(-2);
+  }
+
+  function loadPhotoLibrary() {
+    var stock = (window.ZIA_STOCK_IMAGES || []).map(function (s) {
+      return { type: "photo", path: s.path, label: s.label, group: s.group, stock: true };
+    });
+    return listStorageImages("", 2)
+      .catch(function (err) {
+        console.warn("[admin] 올린 사진 목록을 불러오지 못했어요:", err);
+        return null; // null = 보관함 조회 실패 (안내만 하고 기본 사진은 계속 보여준다)
+      })
+      .then(function (uploaded) {
+        return { uploaded: uploaded, stock: stock };
+      });
+  }
+
+  /* ── 카드 렌더 ── */
+
+  // 홈 칸 고르기 중일 때만 보이는 "이 칸 비우기" (글 번호 0 = 비우기 약속)
+  function clearCardHtml() {
+    return '<button type="button" class="lib-card" data-type="post" data-key="__clear" title="이 칸 비우기">' +
+      '<span class="lib-thumb lib-thumb-empty">비우기</span>' +
+      '<span class="lib-label">이 칸 비우기</span>' +
+      '<span class="lib-meta"><span class="pill">홈에서 빼요</span></span></button>';
+  }
+
+  function renderLibItems(box, items) {
+    if (libTab === "photo") { renderPhotoTab(box, items); return; }
+    var clearCard = (libTab === "post" && libPick && libPick.canClear) ? clearCardHtml() : "";
+    if (!items || !items.length) {
+      box.innerHTML = (clearCard ? '<div class="lib-grid">' + clearCard + "</div>" : "") +
+        '<p class="lib-empty">' +
+        (libTab === "post" ? "아직 글이 없어요. \"자세히 관리 → 글 관리\"에서 먼저 써 주세요."
+                           : "아직 후기 카드가 없어요. \"자세히 관리 → 후기 관리\"에서 먼저 써 주세요.") + "</p>";
+      if (clearCard) bindLibCards(box, []);
+      return;
+    }
+    var html = '<div class="lib-grid">' + clearCard +
+      items.map(libTab === "post" ? postCardHtml : reviewCardHtml).join("") + "</div>";
+    box.innerHTML = html;
+    bindLibCards(box, items);
+  }
+
+  function renderPhotoTab(box, data) {
+    var uploaded = data && data.uploaded;
+    var stock = (data && data.stock) || [];
+    var html = '<div class="lib-drop" id="lib-drop"><span class="lib-drop-hint">사진을 여기에 끌어다 놓거나, 눌러서 골라 올리세요</span></div>' +
+      '<input type="file" id="lib-drop-file" accept="image/*" multiple class="hidden">';
+
+    html += '<h3 class="lib-sec">올린 사진</h3>';
+    if (uploaded === null) {
+      html += '<p class="lib-empty">올린 사진 목록을 지금은 볼 수 없어요. 아래 "홈페이지 기본 사진"은 그대로 쓸 수 있어요.</p>';
+    } else if (!uploaded.length) {
+      html += '<p class="lib-empty">아직 올린 사진이 없어요. 위쪽에 사진을 끌어다 놓아 보세요.</p>';
+    } else {
+      html += '<div class="lib-grid">' + uploaded.map(photoCardHtml).join("") + "</div>";
+    }
+
+    html += '<h3 class="lib-sec">홈페이지 기본 사진</h3>';
+    var groups = [];
+    stock.forEach(function (s) { if (groups.indexOf(s.group) === -1) groups.push(s.group); });
+    groups.forEach(function (g) {
+      html += '<div class="lib-subsec">' + esc(g) + "</div>" +
+        '<div class="lib-grid">' + stock.filter(function (s) { return s.group === g; }).map(photoCardHtml).join("") + "</div>";
+    });
+
+    box.innerHTML = html;
+    bindLibCards(box, (uploaded || []).concat(stock));
+
+    // 드래그 업로드 (기존 공용 배선 재사용)
+    var drop = byId("lib-drop");
+    var input = byId("lib-drop-file");
+    if (drop && input) {
+      bindDropUpload(drop, input, function (files) {
+        var hint = drop.querySelector(".lib-drop-hint");
+        if (hint) hint.textContent = "사진 올리는 중… (" + files.length + "장)";
+        Promise.all(files.map(function (f) { return uploadImage(f, "home"); }))
+          .then(function () {
+            libCache.photo = null;   // 다시 불러오기
+            toast("사진을 올렸어요");
+            if (libTab === "photo") drawLibBody();
+          })
+          .catch(function (err) {
+            console.error("[admin] upload error:", err);
+            toast("사진을 올리지 못했어요. 다시 시도해 주세요.", "error");
+            if (hint) hint.textContent = "사진을 여기에 끌어다 놓거나, 눌러서 골라 올리세요";
+          });
+      });
+    }
+  }
+
+  function photoCardHtml(item) {
+    return '<button type="button" class="lib-card lib-card-photo" draggable="true"' +
+      ' data-type="photo" data-key="' + esc(item.path) + '" title="' + esc(item.label) + '">' +
+      '<img class="lib-thumb" src="' + esc(adminImageUrl(item.path)) + '" alt="" loading="lazy">' +
+      '<span class="lib-label">' + esc(item.label) + "</span></button>";
+  }
+
+  function postCardHtml(p) {
+    return '<button type="button" class="lib-card" draggable="true"' +
+      ' data-type="post" data-key="' + p.id + '" title="' + esc(p.title || "") + '">' +
+      (p.thumbnail_path
+        ? '<img class="lib-thumb" src="' + esc(adminImageUrl(p.thumbnail_path)) + '" alt="" loading="lazy">'
+        : '<span class="lib-thumb lib-thumb-empty">사진 없음</span>') +
+      '<span class="lib-label">' + esc(p.title || "(제목 없음)") + "</span>" +
+      '<span class="lib-meta">' +
+      '<span class="pill ' + (p.published ? "pill-live" : "pill-draft") + '">' + (p.published ? "발행 중" : "임시저장") + "</span>" +
+      (zoneName(p.zone_id) ? "<span>" + esc(zoneName(p.zone_id)) + "</span>" : "") +
+      "</span></button>";
+  }
+
+  function reviewCardHtml(r) {
+    var text = r.title || r.body || "";
+    if (text.length > 34) text = text.slice(0, 34) + "…";
+    return '<button type="button" class="lib-card" draggable="true"' +
+      ' data-type="review" data-key="' + r.id + '" title="' + esc(r.title || r.body || "") + '">' +
+      (r.thumbnail_path
+        ? '<img class="lib-thumb" src="' + esc(adminImageUrl(r.thumbnail_path)) + '" alt="" loading="lazy">'
+        : '<span class="lib-thumb lib-thumb-empty">사진 없음</span>') +
+      '<span class="lib-label">' + esc(text) + "</span>" +
+      '<span class="lib-meta">' +
+      '<span class="pill ' + (r.published ? "pill-live" : "pill-draft") + '">' + (r.published ? "발행 중" : "임시저장") + "</span>" +
+      (r.is_highlight ? '<span class="pill pill-star">홈 강조</span>' : "") +
+      "</span></button>";
+  }
+
+  function bindLibCards(box, items) {
+    box.querySelectorAll(".lib-card").forEach(function (card) {
+      var type = card.getAttribute("data-type");
+      var key = card.getAttribute("data-key");
+      var item = findLibItem(type, key, items);
+      card.addEventListener("click", function () { onLibItemChosen(type, item, card); });
+      card.addEventListener("dragstart", function (e) {
+        if (!e.dataTransfer) return;
+        var payload = JSON.stringify({ type: type, item: item });
+        try {
+          e.dataTransfer.setData("application/x-zia-item", payload);
+          e.dataTransfer.setData("text/plain", payload);
+        } catch (err) { /* 일부 브라우저는 커스텀 타입 미지원 — text/plain 로 충분 */ }
+        e.dataTransfer.effectAllowed = "copy";
+        // 미리보기 쪽이 받을 자리를 표시할 수 있게 알려 준다 (모르는 신호는 무시되므로 무해)
+        sendToFrame("zia-edit-place", { accept: type, item: item });
+      });
+      card.addEventListener("dragend", function () { sendToFrame("zia-edit-place-cancel", {}); });
+    });
+  }
+
+  function findLibItem(type, key, items) {
+    if (key === "__clear") return { id: 0, clear: true };   // "이 칸 비우기" 카드
+    if (type === "photo") {
+      var f = (items || []).find(function (x) { return x && x.path === key; });
+      return f || { type: "photo", path: key, label: "" };
+    }
+    var id = Number(key);
+    var row = (items || []).find(function (x) { return x && x.id === id; });
+    return row || { id: id };
+  }
+
+  function onLibItemChosen(type, item, cardEl) {
+    if (libPick) {
+      if (libPick.accept && libPick.accept !== type) {
+        toast(libPick.accept === "photo" ? "여기에는 사진을 넣을 수 있어요"
+          : libPick.accept === "post" ? "여기에는 글을 넣을 수 있어요" : "여기에는 후기를 넣을 수 있어요", "error");
+        return;
+      }
+      var reqId = libPick.reqId;
+      libPick = null;
+      drawLibNote();
+      highlightLibCard(null);
+      sendToFrame("zia-edit-picked", { reqId: reqId, ok: true, item: item });
+      liveStatus("골랐어요");
+      return;
+    }
+    // 상시 모드 — "어디에 넣을까요?" 안내 상태 (드래그로도 넣을 수 있다)
+    libPlacing = { type: type, item: item };
+    highlightLibCard(cardEl);
+    drawLibNote();
+    sendToFrame("zia-edit-place", { accept: type, item: item });
+  }
+
+  function highlightLibCard(cardEl) {
+    var box = byId("lib-body");
+    if (box) box.querySelectorAll(".lib-card.chosen").forEach(function (c) { c.classList.remove("chosen"); });
+    if (cardEl) cardEl.classList.add("chosen");
+  }
+
+  function cancelPick() {
+    if (!libPick) return;
+    var reqId = libPick.reqId;
+    libPick = null;
+    drawLibNote();
+    highlightLibCard(null);
+    sendToFrame("zia-edit-picked", { reqId: reqId, ok: false, message: "고르기를 그만뒀어요." });
+  }
+
+  function cancelPlacing() {
+    libPlacing = null;
+    drawLibNote();
+    highlightLibCard(null);
+    sendToFrame("zia-edit-place-cancel", {});
+  }
+
+  // 미리보기가 "여기에 넣을 것을 골라 주세요"라고 요청 (계약 v2 §6 zia-edit-pick)
+  var PICK_SLOT_LABEL = { photo: "넣을 사진을 골라 주세요", post: "넣을 글을 골라 주세요", review: "넣을 후기를 골라 주세요" };
+  var MAX_UPLOAD_BYTES = 8 * 1024 * 1024;   // edit-overlay.js 와 같은 한도
+
+  function onEditPick(d) {
+    // 미리보기에 사진을 바로 끌어다 놓은 경우 — 모음을 열 필요 없이 부모가 올리고 회신한다
+    if (d.upload && d.upload.dataUrl) { uploadForPick(d); return; }
+    var accept = ["photo", "post", "review"].indexOf(d.accept) !== -1 ? d.accept : "photo";
+    // 미리보기가 알려준 자리 이름은 내부 이름일 수 있다 → 지도의 한국어 라벨로 바꿔 보여 준다
+    var def = typeof d.slot === "string" ? fieldDef(d.slot) : null;
+    var where = (def && def.label) || (typeof d.slot === "string" && d.slot.indexOf(".") === -1 ? d.slot : "");
+    libPlacing = null;
+    libPick = {
+      reqId: d.reqId,
+      accept: accept,
+      // 홈 칸(L2)일 때는 "이 칸 비우기"도 고를 수 있게 한다 (칸 픽커의 "홈에서 빼기"와 같은 동작)
+      canClear: !!(def && def.kind === "slot"),
+      slotLabel: (where ? where + " — " : "") + PICK_SLOT_LABEL[accept]
+    };
+    setPanelOpen(true);
+    setLibTab(accept);
+    drawLibNote();
+    var panel = byId("live-panel");
+    if (panel) {
+      panel.classList.add("pick-on");
+      setTimeout(function () { panel.classList.remove("pick-on"); }, 1200);
+    }
+  }
+
+  // 미리보기에서 끌어다 놓은 사진 → 보관함에 올린 뒤 고른 결과로 회신
+  function uploadForPick(d) {
+    var up = d.upload || {};
+    function fail(message) {
+      liveStatus("사진을 올리지 못했어요", true);
+      sendToFrame("zia-edit-picked", { reqId: d.reqId, ok: false, message: message });
+    }
+    if (up.size && up.size > MAX_UPLOAD_BYTES) { fail("사진이 너무 커요. 8MB보다 작은 사진으로 올려 주세요."); return; }
+    liveStatus("사진 올리는 중…");
+    dataUrlToBlob(up.dataUrl)
+      .then(function (blob) { return uploadImage(blob, "home"); })
+      .then(function (res) {
+        libCache.photo = null;               // 모음 다시 불러오기
+        if (libTab === "photo" && byId("lib-body")) drawLibBody();
+        liveStatus("사진을 올렸어요");
+        sendToFrame("zia-edit-picked", {
+          reqId: d.reqId, ok: true,
+          item: { type: "photo", path: res.path, url: res.url, label: "올린 사진" }
+        });
+      })
+      .catch(function (err) {
+        console.error("[admin] 사진 올리기 실패:", err);
+        fail("사진을 올리지 못했어요. jpg·png 사진으로 다시 시도해 주세요.");
+      });
+  }
+
+  /* ════════════════════════ 그 자리에서 저장 (계약 v2 §6 — 부모가 유일한 쓰기 주체) ════════════════════════ */
+
+  // 행 단위로 고칠 수 있는 표 (그 밖의 이름은 받지 않는다)
+  var EDITABLE_ROW_TABLES = { posts: true, reviews: true, faqs: true, zones: true };
+
+  // 미리보기가 노출한 필드 지도 (cms-inject.js 의 window.ZIA_FIELD_MAP — 같은 오리진이라 읽을 수 있다)
+  function frameFieldMap() {
+    var f = liveFrame();
+    try { return (f && f.contentWindow && f.contentWindow.ZIA_FIELD_MAP) || null; } catch (err) { return null; }
+  }
+
+  function chkRes(res) { if (res && res.error) throw res.error; return res; }
+
+  // 미리보기가 알려준 자리 이름 → 지도 엔트리
+  function fieldDef(fieldId) {
+    var map = frameFieldMap();
+    return (map && fieldId && map[fieldId]) || null;
+  }
+  // 원장에게 그대로 보여 줄 안내가 있는 실패 (아래 editSaveErrorMessage 가 우선 사용)
+  function ziaError(message) {
+    var e = new Error("zia-blocked");
+    e.ziaMessage = message;
+    return e;
+  }
+
+  function onEditSave(d) {
+    var reqId = d.reqId;
+    var kind = ["text", "html", "image"].indexOf(d.kind) !== -1 ? d.kind : "text";
+    var value = String(d.value == null ? "" : d.value);
+    var target = d.target || {};
+    var job, isSlot = false;
+    if (target.fieldId) {
+      // 홈 첫 화면 "칸 배치"(L2)는 쓰는 모양이 달라 전용 경로로 간다 (saveSlotTarget 주석)
+      var def = fieldDef(target.fieldId);
+      if (def && def.kind === "slot") { isSlot = true; job = saveSlotTarget(def, target, value); }
+      else job = saveFieldTarget(target, value);
+    }
+    else if (target.override) job = saveOverrideTarget(target.override, kind, value);
+    else job = Promise.reject(new Error("zia-no-target"));
+
+    liveStatus("저장 중…");
+    job.then(function (out) {
+      var message = (isSlot && out && out.message) || "저장했어요";
+      liveStatus(message);
+      sendToFrame("zia-edit-saved", { reqId: reqId, ok: true, message: message, value: value });
+    }).catch(function (err) {
+      console.error("[admin] 그 자리에서 저장 실패:", err);
+      var message = editSaveErrorMessage(err);
+      liveStatus("저장하지 못했어요", true);
+      toast(message, "error");
+      sendToFrame("zia-edit-saved", { reqId: reqId, ok: false, message: message });
+    });
+  }
+
+  // L1/L2 — 정본 표에 저장 (오버라이드로 정본을 덮지 않는다, 계약 §2)
+  function saveFieldTarget(target, value) {
+    var map = frameFieldMap();
+    var def = map && map[target.fieldId];
+    var src = def && def.source;
+    if (!src || !src.table) return Promise.reject(new Error("zia-unknown-field"));
+
+    if (src.table === "site_settings") {
+      if (!src.key) return Promise.reject(new Error("zia-unknown-field"));
+      return sb.from("site_settings").upsert({ key: src.key, value: value }, { onConflict: "key" }).then(chkRes);
+    }
+    if (!EDITABLE_ROW_TABLES[src.table] || !src.column) return Promise.reject(new Error("zia-unknown-field"));
+    // 어느 줄인지는 미리보기가 알려 준다 (주입 시 심어 둔 값 — rowId / row.id 둘 다 받는다)
+    var rowId = target.rowId != null ? target.rowId : (target.row && target.row.id);
+    if (rowId == null || isNaN(Number(rowId))) return Promise.reject(new Error("zia-no-row"));
+    var patch = {};
+    patch[src.column] = value;
+    return sb.from(src.table).update(patch).eq("id", Number(rowId)).then(chkRes);
+  }
+
+  // L2 — 홈 첫 화면 "칸 배치" (계약 §2 L2). 쓰는 모양이 L1 과 정반대라 전용 경로다.
+  //   L1 : update <표>  set <칼럼>    = <값>       where id = <미리보기가 알려준 행 번호>
+  //   L2 : update posts set home_slot = <칸 번호>  where id = <고른 글 번호>
+  // 규칙은 "홈 화면 관리" 칸 픽커(drawHomeSlots/openHomePicker/assignHomeSlot)가 정본이며
+  // 여기서는 같은 규칙을 그대로 따른다 — 두 경로는 대체가 아니라 병행이다.
+  //   · 고른 글을 그 분야·그 칸에 담는다
+  //   · 그 칸에 있던 글은 비운다 (칸 하나에 글 하나)
+  //   · 같은 글이 다른 칸에 있었으면 그 글의 칸 번호만 옮긴다 (한 줄 수정이라 중복이 안 생긴다)
+  //   · 값 0 = 이 칸 비우기
+  // 쓰기 순서: **먼저 비우고 나중에 채운다** — 한 분야 안에서 같은 칸 번호를 두 글이
+  //   동시에 가질 수 없기 때문(uq_posts_zone_home_slot). 채우기가 실패하면 비워 둔 칸을
+  //   되돌린다(되돌리기까지 실패하면 그 칸은 빈 상태로 남고, 화면에 그대로 안내된다).
+  function saveSlotTarget(def, target, value) {
+    var src = (def && def.source) || {};
+    var slotNo = Number(src.slot);
+    var zoneId = Number(target.rowId != null ? target.rowId : (target.row && target.row.id));
+    var postId = Number(value);   // 0 = 이 칸 비우기
+    if (!(slotNo >= 1 && slotNo <= HOME_SLOT_COUNT)) return Promise.reject(new Error("zia-unknown-field"));
+    if (!zoneId) return Promise.reject(new Error("zia-no-row"));
+    if (isNaN(postId) || postId < 0) return Promise.reject(new Error("zia-unknown-field"));
+
+    var COLS = "id, zone_id, home_slot, published, title";
+    // 1) 지금 이 칸에 있는 글부터 확인 (같은 분야·같은 칸은 최대 한 줄)
+    return sb.from("posts").select(COLS).eq("zone_id", zoneId).eq("home_slot", slotNo).limit(1)
+      .then(chkRes)
+      .then(function (res) {
+        var occupant = (res.data || [])[0] || null;
+        if (!postId) {   // 빼기
+          if (!occupant) return { message: "이 칸은 이미 비어 있어요." };
+          return sb.from("posts").update({ home_slot: null }).eq("id", occupant.id).then(chkRes)
+            .then(function () { return { message: "홈 화면에서 뺐어요. 글은 그대로 있어요." }; });
+        }
+        if (occupant && occupant.id === postId) return { message: "이미 이 칸에 있는 글이에요." };
+        return sb.from("posts").select(COLS).eq("id", postId).limit(1).then(chkRes).then(function (r2) {
+          var picked = (r2.data || [])[0] || null;
+          if (!picked) throw ziaError("고른 글을 찾지 못했어요. 새로고침한 뒤 다시 해 주세요.");
+          if (Number(picked.zone_id) !== zoneId) {
+            throw ziaError("이 글은 다른 진료 분야의 글이에요. 이 자리에는 같은 분야의 글만 넣을 수 있어요.");
+          }
+          if (!picked.published) {
+            throw ziaError("이 글은 아직 발행 전이에요. \"자세히 관리 → 글 관리\"에서 발행한 뒤에 홈 화면에 넣을 수 있어요.");
+          }
+          var clear = occupant
+            ? sb.from("posts").update({ home_slot: null }).eq("id", occupant.id).then(chkRes)
+            : Promise.resolve(null);
+          return clear
+            .then(function () {
+              return sb.from("posts").update({ home_slot: slotNo }).eq("id", postId).then(chkRes);
+            })
+            .then(function () { return { message: "홈 화면에 담았어요. 바로 반영돼요." }; })
+            .catch(function (err) {
+              if (!occupant) throw err;
+              // 채우기 실패 → 비워 둔 칸 되돌리기 (성공하든 실패하든 원래 오류를 알린다)
+              return sb.from("posts").update({ home_slot: slotNo }).eq("id", occupant.id)
+                .then(function () { throw err; }, function () { throw err; });
+            });
+        });
+      })
+      .then(function (out) {
+        libCache.post = null;   // 모음의 "N번 칸에 있음" 표시가 달라진다 → 다시 불러오기
+        return out;
+      });
+  }
+
+  // L3 — 어디에도 해당하지 않는 자리. page_overrides 표에 저장 (계약 §3)
+  function saveOverrideTarget(ov, kind, value) {
+    if (!ov || !ov.page || !ov.selector) return Promise.reject(new Error("zia-no-target"));
+    return sb.from("page_overrides").upsert({
+      page: String(ov.page),
+      selector: String(ov.selector),
+      kind: kind,
+      value: value,
+      anchor_hash: ov.anchorHash || null
+    }, { onConflict: "page,selector" }).then(chkRes);
+  }
+
+  // 오류 → 원장이 읽는 한국어 안내 (전문용어 노출 금지)
+  function editSaveErrorMessage(err) {
+    if (err && err.ziaMessage) return err.ziaMessage;   // 원장에게 그대로 보여 줄 안내
+    var msg = String((err && (err.message || err.details)) || "").toLowerCase();
+    var code = String((err && err.code) || "");
+    if (msg.indexOf("zia-unknown-field") !== -1 || msg.indexOf("zia-no-row") !== -1 || msg.indexOf("zia-no-target") !== -1) {
+      return "이 부분은 아직 여기서 바로 고칠 수 없어요. 위쪽 \"자세히 관리\"에서 바꿔 주세요.";
+    }
+    if (code === "42P01" || msg.indexOf("does not exist") !== -1 || msg.indexOf("schema cache") !== -1 ||
+        msg.indexOf("not find the table") !== -1) {
+      return "이 자리를 바로 고치는 기능은 아직 준비 중이에요. 준비되면 알려 드릴게요.";
+    }
+    if (code === "23505" || msg.indexOf("uq_posts_zone_home_slot") !== -1 || msg.indexOf("duplicate key") !== -1) {
+      return "이 칸에 다른 글이 먼저 들어갔어요. 화면을 새로 불러온 뒤 다시 해 주세요.";
+    }
+    if (code === "42501" || msg.indexOf("row-level security") !== -1 || msg.indexOf("permission") !== -1) {
+      return "이 내용을 바꿀 수 있는 권한이 없어요. 관리 담당자(GUAVA)에게 알려 주세요.";
+    }
+    if (msg.indexOf("fetch") !== -1 || msg.indexOf("network") !== -1) {
+      return "인터넷 연결을 확인하고 다시 시도해 주세요.";
+    }
+    return "저장하지 못했어요. 다시 시도해 주세요. 계속 안 되면 관리 담당자(GUAVA)에게 알려 주세요.";
   }
 
   /* ════════════════════════ 진료 분야(ZONE) 관리 ════════════════════════ */
@@ -471,7 +1210,7 @@
 
   function renderZoneList(zones) {
     var html =
-      backLink("#/", "처음으로") +
+      backLink("#/manage", "관리 목록으로") +
       '<h1 class="view-title">진료 분야 관리</h1>' +
       '<p class="view-desc">스위치를 누르면 바로 저장돼요.<br>' +
       "&middot; <b>홈페이지 노출</b>: 홈페이지 메뉴에 이 분야를 보여줘요<br>" +
@@ -576,7 +1315,7 @@
     }).join("");
 
     var html =
-      backLink("#/", "처음으로") +
+      backLink("#/manage", "관리 목록으로") +
       '<h1 class="view-title">글 관리</h1>' +
       '<p class="view-desc">홈페이지 진료 소개에 나오는 글이에요. "발행 중"인 글만 홈페이지에 보여요.</p>' +
       whereNote("posts") +
@@ -976,7 +1715,7 @@
   function renderHome(posts) {
     var tabZones = state.zones.filter(function (z) { return z.show_in_home_tabs; }).sort(byHomeTabOrder);
     var html =
-      backLink("#/", "처음으로") +
+      backLink("#/manage", "관리 목록으로") +
       '<h1 class="view-title">홈 화면 관리</h1>' +
       '<p class="view-desc">홈 첫 화면 "진료 소개"에 나올 글을 정해요. 분야(탭)마다 <b>6칸</b>이 있어요.<br>' +
       "빈 칸을 누르면 글을 골라 담을 수 있고, 채워진 칸을 누르면 바꾸거나 뺄 수 있어요.</p>" +
@@ -1173,7 +1912,7 @@
     }
 
     var html =
-      backLink("#/", "처음으로") +
+      backLink("#/manage", "관리 목록으로") +
       '<h1 class="view-title">자주 묻는 질문 관리</h1>' +
       '<p class="view-desc">홈페이지 "자주 묻는 질문"에 나오는 내용이에요. ▲▼ 버튼으로 순서를 바꾸면 바로 저장돼요.</p>' +
       whereNote("faqs") +
@@ -1377,7 +2116,7 @@
 
   function renderReviewList(reviews) {
     var html =
-      backLink("#/", "처음으로") +
+      backLink("#/manage", "관리 목록으로") +
       '<h1 class="view-title">후기 관리</h1>' +
       '<p class="view-desc">홈페이지 후기 카드예요. 의료광고법 때문에 치료 경험담이 아니라 ' +
       '<b>진료 프로그램을 소개하는 글</b>로 써 주세요.</p>' +
@@ -1598,7 +2337,7 @@
     rows.forEach(function (r) { original[r.key] = r.value; });
 
     var html =
-      backLink("#/", "처음으로") +
+      backLink("#/manage", "관리 목록으로") +
       '<h1 class="view-title">병원 정보</h1>' +
       '<p class="view-desc">홈페이지 곳곳(전화번호·진료시간·주소·예약 버튼)에 쓰이는 정보예요. ' +
       '바꾼 뒤 아래 <b>저장하기</b>를 꼭 눌러 주세요.</p>' +
@@ -1649,7 +2388,7 @@
 
   function viewPassword() {
     root().innerHTML =
-      backLink("#/", "처음으로") +
+      backLink("#/live", "홈페이지 보며 수정으로") +
       '<h1 class="view-title">비밀번호 변경</h1>' +
       '<p class="view-desc">이 관리자 화면에 <b>로그인할 때 쓰는 비밀번호</b>를 바꿉니다.</p>' +
       '<div class="card" style="max-width:480px">' +
