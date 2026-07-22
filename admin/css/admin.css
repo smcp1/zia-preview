@@ -203,7 +203,6 @@ textarea { resize: vertical; min-height: 140px; line-height: 1.6; }
 .pill-live { background: var(--green-pale); color: var(--green-dark); }
 .pill-draft { background: #eef0ef; color: var(--muted); }
 .pill-fail { background: var(--red-pale); color: var(--red); }
-.pill-pass { background: var(--green-pale); color: var(--green-dark); }
 .pill-star { background: #fdf3d8; color: #8a6d1a; }
 
 .empty-note { text-align: center; color: var(--muted); padding: 40px 10px; }
@@ -223,34 +222,6 @@ textarea { resize: vertical; min-height: 140px; line-height: 1.6; }
 .guide-good h3 { color: var(--green-dark); }
 .guide-good li::before { content: "○"; position: absolute; left: 0; color: var(--green-dark); font-weight: 800; }
 .guide-foot { padding: 10px 18px; font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--line); }
-
-/* ── 금지어 하이라이트 (textarea 오버레이) ────────────────────── */
-.hl-wrap { position: relative; }
-.hl-backdrop {
-  position: absolute; inset: 0; overflow: auto; pointer-events: none;
-  border: 1.5px solid transparent; border-radius: 10px;
-  padding: 12px 14px; font: inherit; font-size: 1.0625rem; line-height: 1.6;
-  white-space: pre-wrap; word-wrap: break-word; color: transparent;
-}
-.hl-wrap textarea { position: relative; background: transparent; width: 100%; }
-.hl-backdrop mark { color: transparent; border-radius: 3px; }
-.hl-backdrop mark.hl-error { background: rgba(192, 57, 43, 0.22); box-shadow: 0 2px 0 var(--red); }
-.hl-backdrop mark.hl-warn { background: rgba(163, 105, 11, 0.2); box-shadow: 0 2px 0 var(--amber); }
-
-/* ── 검사 결과 패널 ───────────────────────────────────────────── */
-.lint-panel { border-radius: var(--radius); border: 1.5px solid var(--line); padding: 14px 18px; margin-top: 14px; }
-.lint-panel.lint-ok { border-color: #c4e0d7; background: var(--green-pale); }
-.lint-panel.lint-bad { border-color: #eac6c0; background: var(--red-pale); }
-.lint-panel.lint-warn-only { border-color: #ecd9ae; background: var(--amber-pale); }
-.lint-panel h3 { font-size: 1rem; margin-bottom: 8px; }
-.lint-panel.lint-ok h3 { color: var(--green-dark); }
-.lint-panel.lint-bad h3 { color: var(--red); }
-.lint-panel.lint-warn-only h3 { color: var(--amber); }
-.lint-issue { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; font-size: 0.95rem; }
-.lint-issue .term { font-weight: 800; color: var(--red); }
-.lint-issue.warn .term { color: var(--amber); }
-.lint-issue .alt { color: var(--green-dark); font-weight: 600; }
-.lint-issue .where { font-size: 0.8rem; color: var(--muted); margin-right: 6px; }
 
 /* ── 설정 그룹 ────────────────────────────────────────────────── */
 .settings-group { margin-bottom: 24px; }
@@ -396,6 +367,56 @@ button.pick-item:hover { border-color: var(--green); background: var(--green-pal
 .zone-hero { margin-top: 10px; }
 .zone-hero .img-drop { min-height: 64px; padding: 8px; }
 .zone-hero .img-drop-preview { max-height: 64px; }
+
+/* ── P3-e: 홈페이지 보며 수정 (#/live) ────────────────────────── */
+.dash-card-live {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, var(--green-pale), #fff);
+  border: 2px solid var(--green);
+  padding: 30px 26px;
+}
+.dash-card-live .dash-icon { background: var(--green); color: #fff; font-size: 1.5rem; width: 56px; height: 56px; }
+.dash-card-live h2 { font-size: 1.45rem; color: var(--green-dark); }
+.dash-card-live p { font-size: 1.02rem; }
+
+.live-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.live-bar select { max-width: 240px; }
+.live-device { display: inline-flex; border: 1.5px solid var(--line); border-radius: 10px; overflow: hidden; }
+.live-dev-btn {
+  min-height: 44px; padding: 0 16px; border: none; border-radius: 0;
+  background: #fff; color: var(--muted); font-weight: 600;
+}
+.live-dev-btn.active { background: var(--green); color: #fff; font-weight: 800; }
+.live-frame-wrap {
+  border: 1.5px solid var(--line); border-radius: var(--radius); background: #fff;
+  box-shadow: var(--shadow); overflow: hidden;
+}
+.live-frame-wrap iframe {
+  display: block; width: 100%; height: min(72vh, 900px); border: 0; background: #fff;
+}
+.live-frame-wrap.mobile { max-width: 390px; margin: 0 auto; }
+
+/* 편집 화면 상단 "어디에 보이나요?" 안내 줄 */
+.where-note {
+  background: #eef4fb; border: 1px solid #cfe0f3; border-radius: 10px;
+  padding: 10px 14px; margin: -8px 0 18px; font-size: 0.95rem; color: var(--navy);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.where-note .where-q { font-weight: 800; flex-shrink: 0; }
+.where-note .where-view { min-height: 38px; background: #fff; }
+
+/* 저장 토스트 속 "홈페이지에서 확인하기" 버튼 */
+#toast.show { pointer-events: auto; } /* 기본 #toast 는 pointer-events:none — 버튼 클릭 허용 */
+#toast .toast-view-btn {
+  display: block; margin: 10px auto 0; min-height: 42px; padding: 0 18px;
+  border-radius: 9px; border: 1px solid rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.14); color: #fff; font: inherit;
+  font-size: 0.95rem; font-weight: 700; cursor: pointer;
+}
+#toast .toast-view-btn:hover { background: rgba(255, 255, 255, 0.28); }
 
 /* ── 셸: 로그인 화면 + 앱 레이아웃 (index.html 정적 골격) ──────────── */
 .login-screen {

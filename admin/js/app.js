@@ -3,8 +3,8 @@
  *   원칙: 이용자 = 원장(비개발자). 전 화면 한국어 · 전문용어 0 · 실수 방지.
  *   기술: 순수 vanilla JS + supabase-js v2 (CDN) — 빌드 스텝 없음.
  *   보안: publishable 키 + RLS(rls.sql)가 경계. service_role 키 사용 금지.
- *   후기 발행 = 하드 게이트 (zia-cms-sprint.md 결정 trace 2026-07-22):
- *     lint-terms 오류 존재 시 발행 버튼 차단. 임시저장은 항상 허용.
+ *   후기 발행 = 자유 발행 (사용자 결단 2026-07-22 "lint 없애줘 전부" — 의료광고법
+ *     lint 전면 제거. 광고법 검증·리스크 소유는 운영 주체로 이관, 글 편집기와 동일 정책).
  * ========================================================================== */
 (function () {
   "use strict";
@@ -16,7 +16,6 @@
 
   function byId(id) { return document.getElementById(id); }
   function root() { return byId("view-root"); }
-  function isBlank(s) { return !s || !String(s).replace(/\s/g, ""); }
 
   /* ════════════════════════ 초기화 · 인증 ════════════════════════ */
 
@@ -34,6 +33,8 @@
     byId("btn-password").addEventListener("click", function () { location.hash = "#/password"; });
     byId("btn-brand").addEventListener("click", function () { location.hash = "#/"; });
     window.addEventListener("hashchange", render);
+    // P3-e: #/live iframe(수정 모드 배지 클릭) → 편집 화면 이동. origin 검증 + hash 화이트리스트.
+    window.addEventListener("message", onEditNavMessage);
 
     sb.auth.getSession().then(function (res) {
       state.session = res.data ? res.data.session : null;
@@ -130,6 +131,69 @@
   function zoneName(zoneId) {
     var z = (state.zones || []).find(function (x) { return x.id === zoneId; });
     return z ? z.name : "";
+  }
+
+  /* ════════════════════════ P3-e 홈페이지 보며 수정 — 공용 상수·헬퍼 ════════════════════════ */
+
+  // #/live 페이지 선택 목록 (site/*.html — post.html 은 ?id 필요라 제외)
+  var LIVE_PAGES = [
+    { file: "index.html",     label: "홈" },
+    { file: "about.html",     label: "의원소개" },
+    { file: "autonomic.html", label: "자율신경계" },
+    { file: "reviews.html",   label: "치료후기" },
+    { file: "faq.html",       label: "자주 묻는 질문(FAQ)" },
+    { file: "location.html",  label: "오시는길" }
+  ];
+
+  // 편집 화면 → 대표 focus 지점 (edit-overlay.js focus 딥링크 규약 — 계약 v1.2 §8.4)
+  // note = 각 편집 화면 상단 "어디에 보이나요?" 1줄 안내.
+  var LIVE_FOCUS = {
+    zones:    { page: "index.html",     focus: "I4", note: "홈 화면 \"진료 소개\" 탭과 위쪽 메뉴(진료 분야 목록)에 나와요." },
+    home:     { page: "index.html",     focus: "I7", note: "홈 화면 \"진료 소개\" 탭 아래 글 칸(캐러셀)에 나와요." },
+    posts:    { page: "autonomic.html", focus: "A2", note: "발행한 글은 진료 분야 페이지의 글 목록에 나오고, \"홈 화면 관리\"에서 담으면 홈 첫 화면에도 나와요." },
+    faqs:     { page: "faq.html",       focus: "F2", note: "\"자주 묻는 질문\" 페이지에 나오고, 홈 표시를 켠 질문은 홈 화면 아래쪽에도 나와요." },
+    reviews:  { page: "reviews.html",   focus: "R2", note: "\"치료후기\" 페이지에 나오고, 홈 강조를 켠 카드는 홈 첫 화면에도 나와요." },
+    settings: { page: "index.html",     focus: "C6", note: "홈페이지 맨 아래(모든 페이지 공통)와 홈 화면 아래 안내, \"오시는 길\" 페이지에 나와요." }
+  };
+
+  // 배지 postMessage hash 화이트리스트 (LIVE_FOCUS 키와 동일 화면 셋)
+  var EDIT_NAV_HASHES = ["#/settings", "#/zones", "#/home", "#/posts", "#/faqs", "#/reviews"];
+
+  function onEditNavMessage(e) {
+    if (e.origin !== window.location.origin) return; // 같은 오리진 배포 전제 — 외부 메시지 차단
+    var d = e.data;
+    if (!d || d.type !== "zia-edit-nav" || typeof d.hash !== "string") return;
+    if (EDIT_NAV_HASHES.indexOf(d.hash) === -1) return;
+    location.hash = d.hash;
+  }
+
+  function liveHash(screenKey) {
+    var t = LIVE_FOCUS[screenKey];
+    return t ? "#/live?page=" + t.page + "&focus=" + t.focus : "#/live";
+  }
+
+  // 각 편집 화면 상단 "어디에 보이나요?" 안내 줄 (+ 홈페이지에서 보기)
+  function whereNote(screenKey) {
+    var t = LIVE_FOCUS[screenKey];
+    if (!t) return "";
+    return '<div class="where-note"><span class="where-q">어디에 보이나요?</span> ' + esc(t.note) +
+      ' <button type="button" class="btn-ghost btn-sm where-view" data-nav="' + esc(liveHash(screenKey)) + '">홈페이지에서 보기</button></div>';
+  }
+
+  // 저장 성공 토스트 + "홈페이지에서 확인하기" 버튼 → #/live (해당 페이지 + focus 지점)
+  function toastView(message, screenKey) {
+    toast(message, null, 6000); // 버튼 누를 시간 확보 (ui.js holdMs)
+    var el = byId("toast");
+    if (!el || !LIVE_FOCUS[screenKey]) return;
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "toast-view-btn";
+    btn.textContent = "홈페이지에서 확인하기";
+    btn.addEventListener("click", function () {
+      el.className = "";
+      location.hash = liveHash(screenKey);
+    });
+    el.appendChild(btn);
   }
 
   /* ════════════════════════ 이미지 업로드 공용 (P3-d) ════════════════════════ */
@@ -275,6 +339,7 @@
     var h = location.hash || "#/";
     var m;
     if (h === "#/" || h === "" || h === "#") viewDashboard();
+    else if ((m = h.match(/^#\/live(?:\?(.*))?$/))) viewLive(m[1] || "");
     else if (h === "#/zones") viewZones();
     else if (h === "#/home") viewHome();
     else if (h === "#/posts") viewPosts();
@@ -320,11 +385,14 @@
       '<h1 class="view-title">무엇을 할까요?</h1>' +
       '<p class="view-desc">바꾸고 싶은 항목을 눌러 주세요.</p>' +
       '<div class="dash-grid">' +
+      '<a href="#/live" class="dash-card dash-card-live" data-nav="#/live">' +
+      '<div class="dash-icon">👀</div>' +
+      "<h2>홈페이지 보며 수정</h2><p>실제 홈페이지를 띄워 놓고, 바꾸고 싶은 곳의 배지를 눌러 바로 고쳐요 &mdash; 처음이라면 여기부터!</p></a>" +
       dashCard("#/zones", "분", "진료 분야 관리", "홈페이지에 보여줄 진료 분야를 켜고 끕니다") +
       dashCard("#/home", "홈", "홈 화면 관리", "홈 첫 화면 칸에 보여줄 글을 골라 담습니다") +
       dashCard("#/posts", "글", "글 관리", "블로그 글을 붙여넣어 올리고 고칩니다") +
       dashCard("#/faqs", "질", "자주 묻는 질문", "질문·답변을 쓰고 순서를 바꿉니다") +
-      dashCard("#/reviews", "후", "후기 관리", "후기 카드를 쓰고 발행합니다 (표현 자동 검사)") +
+      dashCard("#/reviews", "후", "후기 관리", "후기 카드를 쓰고 발행합니다") +
       dashCard("#/settings", "정", "병원 정보", "전화번호·진료시간·주소를 바꿉니다") +
       "</div>";
     root().querySelectorAll(".dash-card").forEach(function (card) {
@@ -341,6 +409,59 @@
       "<h2>" + esc(title) + "</h2><p>" + esc(desc) + "</p></a>";
   }
 
+  /* ════════════════════════ 홈페이지 보며 수정 (#/live — P3-e) ════════════════════════ */
+
+  var liveDevice = "pc"; // PC/모바일 폭 토글 상태 유지 (세션 내)
+
+  // hash 예: #/live?page=faq.html&focus=F2 — page 는 LIVE_PAGES 화이트리스트, focus 는 지점ID 형식만
+  function viewLive(query) {
+    var params = {};
+    (query || "").split("&").forEach(function (kv) {
+      var i = kv.indexOf("=");
+      if (i > 0) params[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1));
+    });
+    var page = LIVE_PAGES.some(function (p) { return p.file === params.page; }) ? params.page : "index.html";
+    var focus = /^[A-Za-z0-9_]{1,24}$/.test(params.focus || "") ? params.focus : "";
+    // 사이트는 같은 오리진 한 단계 위 — 상대경로라 스테이징 서브패스·프로덕션 모두 동작
+    var src = "../" + page + "?edit=1" + (focus ? "&focus=" + focus : "");
+
+    root().innerHTML =
+      backLink("#/", "처음으로") +
+      '<h1 class="view-title">홈페이지 보며 수정</h1>' +
+      '<p class="view-desc">아래는 실제 홈페이지예요. 색 테두리가 쳐진 곳이 바꿀 수 있는 부분이고, ' +
+      "<b>&#9999;&#65039; 배지를 누르면</b> 그 부분을 고치는 화면으로 바로 이동해요.</p>" +
+      '<div class="live-bar">' +
+      '<select id="live-page" aria-label="보고 있는 페이지">' +
+      LIVE_PAGES.map(function (p) {
+        return '<option value="' + esc(p.file) + '"' + (p.file === page ? " selected" : "") + ">" + esc(p.label) + "</option>";
+      }).join("") +
+      "</select>" +
+      '<div class="live-device" role="group" aria-label="화면 폭">' +
+      '<button type="button" id="live-pc" class="live-dev-btn' + (liveDevice === "pc" ? " active" : "") + '">PC 화면</button>' +
+      '<button type="button" id="live-mobile" class="live-dev-btn' + (liveDevice === "mobile" ? " active" : "") + '">휴대폰 화면</button>' +
+      "</div>" +
+      '<button type="button" class="btn-ghost btn-sm" id="live-open">새 창에서 열기</button>' +
+      "</div>" +
+      '<div id="live-wrap" class="live-frame-wrap' + (liveDevice === "mobile" ? " mobile" : "") + '">' +
+      '<iframe id="live-frame" src="' + esc(src) + '" title="홈페이지 미리보기"></iframe></div>';
+    bindNav(root());
+
+    byId("live-page").addEventListener("change", function () {
+      location.hash = "#/live?page=" + this.value; // 페이지 전환 시 focus 는 해제 (재렌더)
+    });
+    function setDevice(mode) {
+      liveDevice = mode;
+      byId("live-wrap").classList.toggle("mobile", mode === "mobile");
+      byId("live-pc").classList.toggle("active", mode === "pc");
+      byId("live-mobile").classList.toggle("active", mode === "mobile");
+    }
+    byId("live-pc").addEventListener("click", function () { setDevice("pc"); });
+    byId("live-mobile").addEventListener("click", function () { setDevice("mobile"); });
+    byId("live-open").addEventListener("click", function () {
+      window.open(src, "_blank", "noopener"); // 상대경로 — 현 문서(admin/) 기준 해석
+    });
+  }
+
   /* ════════════════════════ 진료 분야(ZONE) 관리 ════════════════════════ */
 
   function viewZones() {
@@ -355,7 +476,8 @@
       '<p class="view-desc">스위치를 누르면 바로 저장돼요.<br>' +
       "&middot; <b>홈페이지 노출</b>: 홈페이지 메뉴에 이 분야를 보여줘요<br>" +
       "&middot; <b>대표 분야</b>: 자주 묻는 질문(FAQ)의 대표 묶음이 돼요<br>" +
-      "&middot; <b>홈 진료탭</b>: 홈 화면 진료 소개 탭에 나와요</p>";
+      "&middot; <b>홈 진료탭</b>: 홈 화면 진료 소개 탭에 나와요</p>" +
+      whereNote("zones");
 
     zones.forEach(function (z) {
       var lockHint = !z.is_visible
@@ -426,7 +548,7 @@
     sb.from("zones").update(patch).eq("id", zone.id).then(function (res) {
       if (res.error) { dbError(res.error); renderZoneList(state.zones); return; }
       Object.assign(zone, patch);
-      toast("저장되었습니다");
+      toastView("저장되었습니다", "zones");
       renderZoneList(state.zones);
     });
   }
@@ -457,6 +579,7 @@
       backLink("#/", "처음으로") +
       '<h1 class="view-title">글 관리</h1>' +
       '<p class="view-desc">홈페이지 진료 소개에 나오는 글이에요. "발행 중"인 글만 홈페이지에 보여요.</p>' +
+      whereNote("posts") +
       '<div class="topbar">' +
       '<select id="posts-filter" style="max-width:220px" aria-label="분야 필터">' + zoneOptions + "</select>" +
       '<button type="button" class="btn-primary" data-nav="#/posts/new">+ 새 글 쓰기</button>' +
@@ -732,8 +855,8 @@
     }
 
     // 저장 (임시저장/발행 공용) — 본문은 sanitize된 HTML(body_html) + 텍스트 추출본(body) 동시 저장.
-    // ⚠ 글 본문에는 의료광고법 lint 미탑재 (사용자 결단 2026-07-22 — GUAVA 생성 단계 기검증.
-    //    후기(reviews)의 lint 하드게이트는 별개로 유지).
+    // ⚠ 의료광고법 lint 미탑재 (사용자 결단 2026-07-22 "lint 없애줘 전부" — 후기 포함 CMS 전면
+    //    제거. 광고법 검증·리스크 소유는 운영 주체로 이관).
     function savePost(existing, publish, btn) {
       showFormError("post-form-error", null);
       var title = byId("post-title").value.trim();
@@ -785,7 +908,8 @@
         });
       }).then(function () {
         busy(btn, false);
-        toast(publish ? "발행되었습니다. 홈페이지에 반영돼요." : "임시저장되었습니다. 홈페이지에는 아직 안 보여요.");
+        if (publish) toastView("발행되었습니다. 홈페이지에 반영돼요.", "posts");
+        else toast("임시저장되었습니다. 홈페이지에는 아직 안 보여요.");
         location.hash = "#/posts";
       }).catch(function (err) {
         busy(btn, false);
@@ -855,7 +979,8 @@
       backLink("#/", "처음으로") +
       '<h1 class="view-title">홈 화면 관리</h1>' +
       '<p class="view-desc">홈 첫 화면 "진료 소개"에 나올 글을 정해요. 분야(탭)마다 <b>6칸</b>이 있어요.<br>' +
-      "빈 칸을 누르면 글을 골라 담을 수 있고, 채워진 칸을 누르면 바꾸거나 뺄 수 있어요.</p>";
+      "빈 칸을 누르면 글을 골라 담을 수 있고, 채워진 칸을 누르면 바꾸거나 뺄 수 있어요.</p>" +
+      whereNote("home");
 
     if (!tabZones.length) {
       html += '<div class="notice-info">홈 진료탭에 켜진 분야가 없어요. 먼저 "진료 분야 관리"에서 <b>홈 진료탭</b> 스위치를 켜 주세요.</div>' +
@@ -975,7 +1100,7 @@
         if (res.error) throw res.error;
       });
     }).then(function () {
-      toast("홈 화면에 담았어요. 바로 반영돼요.");
+      toastView("홈 화면에 담았어요. 바로 반영돼요.", "home");
       viewHome();
     }).catch(function (err) {
       dbError(err);
@@ -1007,7 +1132,7 @@
         close();
         sb.from("posts").update({ home_slot: null }).eq("id", post.id).then(function (res) {
           if (res.error) { dbError(res.error); viewHome(); return; }
-          toast("홈 화면에서 뺐어요. 글 자체는 그대로 있어요.");
+          toastView("홈 화면에서 뺐어요. 글 자체는 그대로 있어요.", "home");
           viewHome();
         });
       }
@@ -1051,6 +1176,7 @@
       backLink("#/", "처음으로") +
       '<h1 class="view-title">자주 묻는 질문 관리</h1>' +
       '<p class="view-desc">홈페이지 "자주 묻는 질문"에 나오는 내용이에요. ▲▼ 버튼으로 순서를 바꾸면 바로 저장돼요.</p>' +
+      whereNote("faqs") +
       '<div class="home-tabs">' +
       '<button type="button" class="home-tab' + (faqsFilterZone === "" ? " active" : "") + '" data-zone="">전체</button>' +
       tabZones.map(function (z) {
@@ -1144,7 +1270,7 @@
         if (res.error) throw res.error;
       });
     })).then(function () {
-      toast("순서를 바꿨어요. 홈페이지에 바로 반영돼요.");
+      toastView("순서를 바꿨어요. 홈페이지에 바로 반영돼요.", "faqs");
       viewFaqs(); // 재로드로 정합 보증
     }).catch(function (err) {
       dbError(err, "순서를 바꾸지 못했어요");
@@ -1228,7 +1354,7 @@
       qy.then(function (res) {
         busy(btn, false);
         if (res.error) { dbError(res.error); return; }
-        toast("저장되었습니다. 홈페이지에 바로 반영돼요.");
+        toastView("저장되었습니다. 홈페이지에 바로 반영돼요.", "faqs");
         location.hash = "#/faqs";
       });
     });
@@ -1254,7 +1380,8 @@
       backLink("#/", "처음으로") +
       '<h1 class="view-title">후기 관리</h1>' +
       '<p class="view-desc">홈페이지 후기 카드예요. 의료광고법 때문에 치료 경험담이 아니라 ' +
-      '<b>진료 프로그램을 소개하는 글</b>로 써야 해요. 발행 전에 자동으로 표현 검사를 해 드려요.</p>' +
+      '<b>진료 프로그램을 소개하는 글</b>로 써 주세요.</p>' +
+      whereNote("reviews") +
       '<div class="topbar"><span></span>' +
       '<button type="button" class="btn-primary" data-nav="#/reviews/new">+ 새 후기 카드 쓰기</button>' +
       "</div><div id=\"reviews-list\"></div>";
@@ -1274,7 +1401,6 @@
         '<div class="item-title">' + esc(text) + "</div>" +
         '<div class="item-meta">' +
         '<span class="pill ' + (r.published ? "pill-live" : "pill-draft") + '">' + (r.published ? "발행 중" : "임시저장") + "</span>" +
-        '<span class="pill ' + (r.lint_passed ? "pill-pass" : "pill-fail") + '">' + (r.lint_passed ? "검사 통과" : "검사 미통과") + "</span>" +
         (r.is_highlight ? '<span class="pill pill-star">홈 화면 강조</span>' : "") +
         (r.zone_id ? "<span>" + esc(zoneName(r.zone_id)) + "</span>" : "") +
         ((r.labels || []).length ? "<span>" + esc((r.labels || []).join(", ")) + "</span>" : "") +
@@ -1353,9 +1479,7 @@
       '<div class="field"><label for="rv-title">제목 <span style="font-weight:400;color:var(--muted)">(선택 — 카드 목록에 크게 표시)</span></label>' +
       '<input type="text" id="rv-title" value="' + esc(isEdit ? review.title || "" : "") + '" placeholder="예: 체질 맞춤 다이어트 프로그램 안내"></div>' +
       '<div class="field"><label for="rv-body">내용</label>' +
-      '<div class="hl-wrap"><div class="hl-backdrop" id="rv-backdrop" aria-hidden="true"></div>' +
       '<textarea id="rv-body" placeholder="프로그램을 소개하는 문장으로 적어 주세요.">' + esc(isEdit ? review.body || "" : "") + "</textarea></div>" +
-      '<p class="help">쓰면 안 되는 표현은 입력하는 동안 아래에 바로 알려 드려요.</p></div>' +
       '<div class="field"><label for="rv-labels">카드 라벨 <span style="font-weight:400;color:var(--muted)">(선택 — 쉼표로 구분, 최대 2개)</span></label>' +
       '<input type="text" id="rv-labels" value="' + esc(isEdit ? (review.labels || []).join(", ") : "") + '" placeholder="예: 여성질환, 난임">' +
       '<p class="field-error hidden" id="rv-labels-error"></p></div>' +
@@ -1370,7 +1494,6 @@
       '<div class="field"><label for="rv-order">표시 순서 <span style="font-weight:400;color:var(--muted)">(선택)</span></label>' +
       '<input type="number" id="rv-order" value="' + (isEdit ? review.sort_order : 0) + '" style="max-width:140px">' +
       '<p class="help">숫자가 작을수록 앞에 나와요.</p></div>' +
-      '<div id="rv-lint-panel"></div>' +
       '<p class="field-error hidden" id="rv-form-error"></p>' +
       '<div class="form-actions" id="rv-actions"></div>' +
       "</div>";
@@ -1379,73 +1502,9 @@
     var bodyEl = byId("rv-body");
     var titleEl = byId("rv-title");
     var labelsEl = byId("rv-labels");
-    var backdrop = byId("rv-backdrop");
-    var lintResult = { passed: true, errorCount: 0, warnCount: 0, issues: [] };
-    var lintTimer = null;
 
     function parseLabels() {
       return labelsEl.value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
-    }
-
-    function runLint() {
-      lintResult = LintTerms.lintFields([
-        { field: "title", label: "제목", text: titleEl.value },
-        { field: "body", label: "내용", text: bodyEl.value },
-        { field: "labels", label: "라벨", text: parseLabels().join(", ") }
-      ]);
-      drawBackdrop();
-      drawLintPanel();
-      updateGate();
-    }
-
-    function scheduleLint() {
-      clearTimeout(lintTimer);
-      lintTimer = setTimeout(runLint, 200);
-    }
-
-    function drawBackdrop() {
-      var text = bodyEl.value;
-      var issues = lintResult.issues.filter(function (i) { return i.field === "body"; });
-      var html = "";
-      var last = 0;
-      issues.forEach(function (i) {
-        if (i.index < last) return;
-        html += esc(text.slice(last, i.index));
-        html += '<mark class="hl-' + i.level + '">' + esc(text.substr(i.index, i.length)) + "</mark>";
-        last = i.index + i.length;
-      });
-      html += esc(text.slice(last));
-      backdrop.innerHTML = html + "\n"; // 마지막 줄 스크롤 정합
-      backdrop.scrollTop = bodyEl.scrollTop;
-    }
-
-    function drawLintPanel() {
-      var panel = byId("rv-lint-panel");
-      var issues = lintResult.issues;
-      if (!issues.length) {
-        panel.innerHTML = isBlank(bodyEl.value)
-          ? ""
-          : '<div class="lint-panel lint-ok"><h3>표현 검사 통과 &mdash; 발행할 수 있어요</h3></div>';
-        return;
-      }
-      var errors = issues.filter(function (i) { return i.level === "error"; });
-      var warns = issues.filter(function (i) { return i.level === "warn"; });
-      var cls = errors.length ? "lint-bad" : "lint-warn-only";
-      var head = errors.length
-        ? "발행하려면 아래 표현을 고쳐 주세요 (" + errors.length + "곳)"
-        : "발행은 가능하지만, 아래 표현을 한번 확인해 주세요";
-      var html = '<div class="lint-panel ' + cls + '"><h3>' + head + "</h3>";
-      errors.concat(warns).forEach(function (i) {
-        html += '<div class="lint-issue' + (i.level === "warn" ? " warn" : "") + '">' +
-          '<span class="where">' + esc(i.fieldLabel || "") + "</span>" +
-          '<span class="term">&lsquo;' + esc(i.term) + "&rsquo;</span> &mdash; " + esc(i.message) +
-          (i.alternates && i.alternates.length
-            ? '<br><span class="alt">이렇게 바꿔 보세요: ' + esc(i.alternates.join(", ")) + "</span>"
-            : "") +
-          "</div>";
-      });
-      html += "</div>";
-      panel.innerHTML = html;
     }
 
     function labelsValid() {
@@ -1459,33 +1518,13 @@
       return true;
     }
 
-    function updateGate() {
-      var publishBtn = byId("rv-publish") || byId("rv-save-live");
-      if (!publishBtn) return;
-      var blocked = isBlank(bodyEl.value) || lintResult.errorCount > 0;
-      publishBtn.disabled = blocked;
-      var hint = byId("rv-gate-hint");
-      if (hint) {
-        if (isBlank(bodyEl.value)) hint.textContent = "내용을 입력하면 발행할 수 있어요.";
-        else if (lintResult.errorCount > 0) hint.textContent = "위에 표시된 표현을 고치면 발행 버튼이 켜져요. 임시저장은 지금도 할 수 있어요.";
-        else hint.textContent = "";
-      }
-    }
-
-    [titleEl, bodyEl, labelsEl].forEach(function (el) {
-      el.addEventListener("input", function () { labelsValid(); scheduleLint(); });
-    });
-    bodyEl.addEventListener("scroll", function () {
-      backdrop.scrollTop = bodyEl.scrollTop;
-      backdrop.scrollLeft = bodyEl.scrollLeft;
-    });
+    labelsEl.addEventListener("input", labelsValid);
 
     var actions = byId("rv-actions");
     if (isEdit && review.published) {
       actions.innerHTML =
         '<button type="button" class="btn-primary" id="rv-save-live">저장하기</button>' +
-        '<button type="button" class="btn-ghost" id="rv-unpublish">발행 중지</button>' +
-        '<p class="help" id="rv-gate-hint" style="width:100%"></p>';
+        '<button type="button" class="btn-ghost" id="rv-unpublish">발행 중지</button>';
       byId("rv-save-live").addEventListener("click", function () { saveReview(review, true, this); });
       byId("rv-unpublish").addEventListener("click", function () {
         var self = this;
@@ -1498,13 +1537,10 @@
     } else {
       actions.innerHTML =
         '<button type="button" class="btn-secondary" id="rv-draft">임시저장</button>' +
-        '<button type="button" class="btn-primary" id="rv-publish">발행하기</button>' +
-        '<p class="help" id="rv-gate-hint" style="width:100%"></p>';
+        '<button type="button" class="btn-primary" id="rv-publish">발행하기</button>';
       byId("rv-draft").addEventListener("click", function () { saveReview(review, false, this); });
       byId("rv-publish").addEventListener("click", function () { saveReview(review, true, this); });
     }
-
-    runLint(); // 초기 1회 (기존 내용 검사 + 게이트 상태 반영)
 
     function saveReview(existing, publish, btn) {
       showFormError("rv-form-error", null);
@@ -1512,13 +1548,8 @@
       var body = bodyEl.value.trim();
       if (!body) { showFormError("rv-form-error", "내용을 입력해 주세요."); return; }
 
-      // 발행 직전 최종 검사 (하드 게이트 — 버튼 상태와 별개로 한 번 더 확인)
-      runLint();
-      if (publish && !lintResult.passed) {
-        showFormError("rv-form-error", "쓰면 안 되는 표현이 남아 있어요. 위 안내를 보고 고친 뒤 발행해 주세요.");
-        return;
-      }
-
+      // lint 필드(lint_passed 등)는 더 이상 기록하지 않음 — 기존 DB 값은 그대로 둠
+      // (사용자 결단 2026-07-22 lint 전면 제거. 발행 조건 = 내용 비어있음 체크만)
       var payload = {
         zone_id: Number(byId("rv-zone").value) || null,
         title: titleEl.value.trim() || null,
@@ -1527,10 +1558,7 @@
         more_url: byId("rv-url").value.trim() || null,
         is_highlight: byId("rv-highlight").checked,
         sort_order: Number(byId("rv-order").value) || 0,
-        published: publish,
-        lint_passed: lintResult.passed,
-        lint_checked_at: new Date().toISOString(),
-        lint_notes: LintTerms.buildNotes(lintResult)
+        published: publish
       };
 
       busy(btn, true, "저장 중…");
@@ -1540,7 +1568,8 @@
       q.then(function (res) {
         busy(btn, false);
         if (res.error) { dbError(res.error); return; }
-        toast(publish ? "발행되었습니다. 홈페이지에 반영돼요." : "임시저장되었습니다. 홈페이지에는 아직 안 보여요.");
+        if (publish) toastView("발행되었습니다. 홈페이지에 반영돼요.", "reviews");
+        else toast("임시저장되었습니다. 홈페이지에는 아직 안 보여요.");
         location.hash = "#/reviews";
       });
     }
@@ -1572,7 +1601,8 @@
       backLink("#/", "처음으로") +
       '<h1 class="view-title">병원 정보</h1>' +
       '<p class="view-desc">홈페이지 곳곳(전화번호·진료시간·주소·예약 버튼)에 쓰이는 정보예요. ' +
-      '바꾼 뒤 아래 <b>저장하기</b>를 꼭 눌러 주세요.</p>';
+      '바꾼 뒤 아래 <b>저장하기</b>를 꼭 눌러 주세요.</p>' +
+      whereNote("settings");
 
     SETTINGS_GROUPS.forEach(function (group) {
       var groupRows = rows.filter(function (r) { return r.group_name === group.key; });
@@ -1607,7 +1637,7 @@
       })).then(function () {
         busy(btn, false);
         changed.forEach(function (c) { original[c.key] = c.value; });
-        toast("저장되었습니다 (" + changed.length + "개 항목)");
+        toastView("저장되었습니다 (" + changed.length + "개 항목)", "settings");
       }).catch(function (err) {
         busy(btn, false);
         dbError(err);

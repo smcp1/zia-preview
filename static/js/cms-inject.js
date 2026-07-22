@@ -38,8 +38,92 @@
 //
 // [N-A] I1 (히어로 slide2 CRM 개인화 문구) — P2 channel.js 소관 (토큰 치환 구현 완료).
 // 본 스크립트는 I2(slide2 예약 카드 href)만 담당한다.
+//
+// [P3-e] 주입 지점 레지스트리(window.ZIA_INJECT_MAP) + 주입 완료 신호(zia:inject-done)를
+// edit-overlay.js(수정 모드)에 제공한다 — 계약 v1.2 §8. 레지스트리는 additive 노출이며
+// 주입 함수 동작과 완전 독립 (주입 로직 회귀 0 원칙).
 (function () {
     'use strict';
+
+    // ════════════════════════════════════════════════════════════════════
+    // P3-e — 주입 지점 레지스트리 (window.ZIA_INJECT_MAP)
+    // 소비처: edit-overlay.js (?edit=1 수정 모드 배지·focus 딥링크).
+    // selector = 오버레이 배지/테두리 target (가시 컨테이너 기준 — 주입 함수의
+    //   내부 셀렉터와 granularity 가 다를 수 있다. 계약 §2~§3 selector 와 짝 관리).
+    // label / adminHash = 관리자 "편집 화면 단위"로 통일 (비개발자 라벨).
+    // adminHash null = 대응 관리 화면 부재 지점 (배지 미표시 — dead-end 차단).
+    //   - I6/A1(태그 필터): 태그 마스터 관리 화면 미구축.
+    //   - C7 은 C6(.cs-info 컨테이너) 배지에 포함, L2 는 주입 보류라 레지스트리 제외.
+    // config 부재 시에도 노출 (오버레이는 정적 사이트에서도 위치 안내 가능).
+    // ════════════════════════════════════════════════════════════════════
+    var EDIT_SCREENS = {
+        settings: { hash: '#/settings', label: '병원 정보에서 수정' },
+        zones:    { hash: '#/zones',    label: '진료 분야 관리에서 수정' },
+        home:     { hash: '#/home',     label: '홈 화면 관리에서 수정' },
+        posts:    { hash: '#/posts',    label: '글 관리에서 수정' },
+        faqs:     { hash: '#/faqs',     label: '자주 묻는 질문에서 수정' },
+        reviews:  { hash: '#/reviews',  label: '후기 관리에서 수정' }
+    };
+    var INJECT_POINTS = {
+        // 공통 (7페이지)
+        C1:  { selector: '.gnb-row .gnb .depth_box .depth2',              screen: 'zones' },    // 모바일 GNB (드로어 열림 시만 가시)
+        C2:  { selector: '.pc-gnb-row .mega-list .depth2',                screen: 'zones' },    // PC 메가메뉴 (hover 시만 가시)
+        C3:  { selector: 'header .btn.appointment',                       screen: 'settings' },
+        C4:  { selector: '#quick ul',                                     screen: 'settings' },
+        C5:  { selector: '.bottom-banner .btn-area',                      screen: 'settings' },
+        C6:  { selector: 'footer .cs-info',                               screen: 'settings' }, // C7(biz-time) 포함 컨테이너
+        C8:  { selector: 'footer .clinic-hours',                          screen: 'settings' },
+        C9:  { selector: 'footer .company-info',                          screen: 'settings' },
+        // index.html
+        I2:  { selector: '.main-visual-swiper .slide2 .appointment-grid', screen: 'settings' },
+        I3:  { selector: '.main-visual-swiper .slide1 .appointment-row',  screen: 'settings' },
+        I4:  { selector: '.section-05 .tab-container',                    screen: 'zones' },
+        I5:  { selector: '#contents-group-line .tab-panel.active .panel-visual', screen: 'zones' },
+        I6:  { selector: '.section-05 .clinic-case-area .tag-list',       screen: null },
+        I7:  { selector: '.section-05 .clinic-case-area .case-swiper',    screen: 'home' },
+        I8:  { selector: '.section-07 .faq-category',                     screen: 'faqs' },
+        I9:  { selector: '.section-07 #faq-list-container',               screen: 'faqs' }, // section-07 스코프 필수 — autonomic.html 이 동일 id 를 정적 재사용 (주입 무관 블록)
+        I10: { selector: '.section-08 .info-list .contact',               screen: 'settings' },
+        I11: { selector: '.section-08 .info-list .time',                  screen: 'settings' },
+        I12: { selector: '.section-08 .address',                          screen: 'settings' },
+        I13: { selector: '.section-08 .btn-group',                        screen: 'settings' },
+        I14: { selector: '.real-stories .review-swiper',                  screen: 'reviews' }, // reviews.html R1 겸용 (동일 selector)
+        // autonomic.html (ZONE 상세)
+        A1:  { selector: '.section-clinic-cases .tag-list',               screen: null },
+        A2:  { selector: '.section-clinic-cases .case-swiper',            screen: 'posts' },
+        // faq.html
+        F1:  { selector: '.faq-tab-area.tab-container',                   screen: 'zones' },
+        F2:  { selector: '.section-faq-list .faq-accordion',              screen: 'faqs' },
+        // reviews.html (R1 = I14 겸용)
+        R2:  { selector: '.section-review-list .review-grid',             screen: 'reviews' },
+        // location.html (L2 보류 — 주입 미구현이라 제외)
+        L1:  { selector: '.section-location .contact-box',                screen: 'settings' },
+        L3:  { selector: '.address-banner .addr-text',                    screen: 'settings' },
+        L4:  { selector: '.address-banner .btn-group',                    screen: 'settings' },
+        // post.html
+        P1:  { selector: '#post-article',                                 screen: 'posts' }
+    };
+    window.ZIA_INJECT_MAP = (function () {
+        var map = {};
+        Object.keys(INJECT_POINTS).forEach(function (id) {
+            var pt = INJECT_POINTS[id];
+            var scr = pt.screen ? EDIT_SCREENS[pt.screen] : null;
+            map[id] = {
+                selector: pt.selector,
+                label: scr ? scr.label : null,
+                adminHash: scr ? scr.hash : null
+            };
+        });
+        return map;
+    })();
+
+    // P3-e — 주입 완료 신호 (오버레이는 flag 선확인 후 이벤트 대기 — 레이스 무해)
+    function markInjectDone() {
+        window.ZIA_INJECT_DONE = true;
+        try {
+            document.dispatchEvent(new CustomEvent('zia:inject-done'));
+        } catch (e) { /* CustomEvent 미지원 구형 — flag 로 충분 */ }
+    }
 
     var CONFIG = window.ZIA_CONFIG || {};
     var SUPA_URL = (CONFIG.supabaseUrl || '').trim().replace(/\/+$/, '');
@@ -56,6 +140,7 @@
                 if (notfound) { notfound.style.display = ''; }
             });
         }
+        markInjectDone(); // P3-e — config 부재 no-op 경로도 완료 신호 (오버레이 대기 해제)
         return;
     }
 
@@ -1050,5 +1135,6 @@
             });
             data.postDetail = out[2];
             safe(function () { apply(data); });
+            markInjectDone(); // P3-e — 주입 완료 신호 (성공·부분 실패 폴백 모두 이 시점 확정)
         });
 })();

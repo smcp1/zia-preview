@@ -14,15 +14,18 @@
       .replace(/'/g, "&#39;");
   }
 
-  /* ── 토스트 ── */
+  /* ── 토스트 ──
+   * holdMs (선택, P3-e): 표시 유지 시간 재정의 — 액션 버튼("홈페이지에서 확인하기")을
+   * 담을 때 누를 시간을 확보. 미지정 시 기존 동작 그대로 (회귀 0).
+   */
   var toastTimer = null;
-  function toast(message, type) {
+  function toast(message, type, holdMs) {
     var el = document.getElementById("toast");
     if (!el) return;
     el.textContent = message;
     el.className = type === "error" ? "toast-error show" : "show";
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { el.className = ""; }, type === "error" ? 4200 : 2600);
+    toastTimer = setTimeout(function () { el.className = ""; }, holdMs || (type === "error" ? 4200 : 2600));
   }
 
   /* ── confirm 모달 (파괴적 액션 전용) ──
