@@ -85,6 +85,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   background: rgba(255, 255, 255, 0.12); color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.25);
   min-height: 44px; font-size: 0.95rem; padding: 0 14px;
+  white-space: nowrap; /* "비밀번호 변경"·"로그아웃" 두 줄 꺾임 방지 (QA 2026-07-22) */
 }
 .app-header .head-actions button:hover { background: rgba(255, 255, 255, 0.22); }
 .head-email { font-size: 0.85rem; opacity: 0.75; width: 100%; text-align: right; }
