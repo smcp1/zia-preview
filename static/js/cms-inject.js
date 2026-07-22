@@ -1,4 +1,12 @@
-// cms-inject.js — Supabase CMS 콘텐츠 주입 (admin/FRONTEND_CONTRACT.md v1.0 구현, P3-c)
+// cms-inject.js — Supabase CMS 콘텐츠 주입 (admin/FRONTEND_CONTRACT.md v1.1 구현, P3-c + P3-d)
+//
+// [P3-d 확장 — 계약 v1.1]
+// - post.html (글 상세): ?id= → v_public_post_detail 조회 → body_html 을
+//   window.ZiaSanitize (화이트리스트 파서 sanitize, admin 에디터와 동일 규칙)로
+//   재-sanitize 후 주입 (이중 방어). 실패·0건·sanitizer 부재 → "글을 찾을 수 없습니다".
+// - I7 홈 캐러셀: home_slot 지정 글만 home_slot 순 (관리자 "홈 화면 관리" 슬롯 픽커).
+//   A2 ZONE 상세 캐러셀: 해당 ZONE 발행 글 전체 (기존 유지).
+// - 카드 클릭: external_url(새 탭) > has_body → post.html?id= > 비링크.
 //
 // 로드 위치: 각 페이지 </body> 직전, site-config.js → channel.js 다음 (동기 스크립트).
 //
@@ -36,7 +44,20 @@
     var CONFIG = window.ZIA_CONFIG || {};
     var SUPA_URL = (CONFIG.supabaseUrl || '').trim().replace(/\/+$/, '');
     var SUPA_KEY = (CONFIG.supabaseKey || '').trim();
-    if (!SUPA_URL || !SUPA_KEY) { return; } // config 부재/빈 값 → 전체 no-op (조용히 종료)
+    if (!SUPA_URL || !SUPA_KEY) {
+        // config 부재/빈 값 → 전체 no-op (조용히 종료).
+        // 단 post.html 은 정적 폴백 콘텐츠가 없는 동적 페이지 — "불러오는 중" 고착 방지 위해
+        // notfound 상태로 전환 후 종료 (P3-d).
+        if (/\/post\.html$/.test(window.location.pathname)) {
+            document.addEventListener('DOMContentLoaded', function () {
+                var loading = document.getElementById('post-loading');
+                var notfound = document.getElementById('post-notfound');
+                if (loading) { loading.style.display = 'none'; }
+                if (notfound) { notfound.style.display = ''; }
+            });
+        }
+        return;
+    }
 
     var FETCH_TIMEOUT_MS = 3000;
 
@@ -69,9 +90,17 @@
         if (pathEnds('/reviews.html')) { return 'reviews'; }
         if (pathEnds('/location.html')) { return 'location'; }
         if (pathEnds('/about.html')) { return 'about'; }
+        if (pathEnds('/post.html')) { return 'post'; } // 글 상세 (P3-d)
         return 'zone'; // ZONE 상세 후보 — zones.page_path 매칭으로 확정 (향후 구축 페이지 자동 커버)
     }
     var KIND = detectKind();
+
+    // 글 상세 대상 id (?id= 숫자만 허용 — 쿼리 문자열 직결 주입 차단)
+    var POST_ID = null;
+    if (KIND === 'post') {
+        var mPostId = /[?&]id=(\d+)(&|$)/.exec(window.location.search);
+        POST_ID = mPostId ? mPostId[1] : null;
+    }
 
     // ---------- 소스 정의 (페이지당 필요한 것만 fetch) ----------
     var SOURCES = {
@@ -89,7 +118,8 @@
         faq:      ['zones', 'faqs', 'settings'],
         reviews:  ['zones', 'reviews', 'settings'],
         location: ['zones', 'settings'],
-        about:    ['zones', 'settings']
+        about:    ['zones', 'settings'],
+        post:     ['zones', 'settings'] // 상세 본문은 별도 fetch (postDetail — 오케스트레이션 참조)
     };
 
     // ---------- 유틸 ----------
@@ -423,10 +453,11 @@
 
         // I5 — 패널 헤더 (english_label/name/description/hero_image_path)
         tabZones.forEach(function (z, i) { fillPanelVisual(panels[i], z); });
-        // I6/I7 — 케이스 영역 보유 패널에 태그·글 주입 (정적으론 패널1=자율신경계만 보유)
+        // I6/I7 — 케이스 영역 보유 패널에 태그·글 주입 (정적으론 패널1=자율신경계만 보유).
+        //         홈 캐러셀은 home_slot 지정 글만 (계약 v1.1 — homeOnly).
         tabZones.forEach(function (z, i) {
             var area = panels[i].querySelector('.clinic-case-area');
-            if (area) { setupCaseArea(area, z, tags, posts); }
+            if (area) { setupCaseArea(area, z, tags, posts, true); }
         });
     }
     function fillPanelVisual(panel, z) {
@@ -463,9 +494,15 @@
     // ========================================================================
     // I6/I7 · A1/A2 — ZONE 태그 필터 + 연계 캐러셀 (index 탭 패널 / ZONE 상세 공용)
     // ========================================================================
-    function setupCaseArea(area, zone, tags, posts) {
+    function setupCaseArea(area, zone, tags, posts, homeOnly) {
         var zoneTags = (tags || []).filter(function (t) { return t.zone_slug === zone.slug; });
         var zonePosts = (posts || []).filter(function (p) { return p.zone_slug === zone.slug; });
+        if (homeOnly) {
+            // I7 (v1.1) — 홈 캐러셀 = home_slot 지정 글만 home_slot 순 (슬롯 픽커 소관).
+            //             0건 → 정적 데모 카드 유지 (원칙 1).
+            zonePosts = zonePosts.filter(function (p) { return p.home_slot != null; });
+            zonePosts.sort(function (a, b) { return a.home_slot - b.home_slot; });
+        }
         // I7/A2 — 해당 ZONE 소속 글만 자동 호출 (§7.1). 0건 → 정적 데모 카드 유지.
         if (zonePosts.length) { rebuildCaseSwiper(area, zonePosts); }
         // I6/A1 — 태그 주입 성공 시 정적 alert() 핸들러는 DOM 교체로 소멸 → 실 필터로 대체.
@@ -477,11 +514,16 @@
         slide.className = 'swiper-slide';
         var a = document.createElement('a');
         a.className = 'case-card';
+        // 클릭 타깃 사다리 (계약 v1.1): external_url(새 탭) > has_body → 온사이트 상세 > 비링크
         var url = (p.external_url || '').trim();
-        a.setAttribute('href', url || '#none'); // 클릭 타깃 = external_url (계약 §6 미결 #7 — 온사이트 상세 없음)
         if (/^https?:/.test(url)) {
+            a.setAttribute('href', url);
             a.setAttribute('target', '_blank');
             a.setAttribute('rel', 'noopener');
+        } else if (p.has_body) {
+            a.setAttribute('href', BASE + '/post.html?id=' + p.id); // 서브패스 BASE 전치 (원칙 5)
+        } else {
+            a.setAttribute('href', '#none');
         }
         var imgBg = document.createElement('div');
         imgBg.className = 'img-bg';
@@ -885,6 +927,66 @@
     }
 
     // ========================================================================
+    // post.html — P1 글 상세 (계약 v1.1, P3-d)
+    // ========================================================================
+    function fmtDate(iso) {
+        if (!iso) { return ''; }
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) { return ''; }
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        return d.getFullYear() + '.' + pad(d.getMonth() + 1) + '.' + pad(d.getDate());
+    }
+    function postShow(which) { // 'loading' | 'notfound' | 'article'
+        var ids = { loading: 'post-loading', notfound: 'post-notfound', article: 'post-article' };
+        Object.keys(ids).forEach(function (k) {
+            var el = document.getElementById(ids[k]);
+            if (el) { el.style.display = (k === which) ? '' : 'none'; }
+        });
+    }
+    function injectPostDetail(rows, zones) {
+        if (!document.getElementById('post-article')) { return; } // post.html 골격 아님 → no-op
+        var row = rows && rows.length ? rows[0] : null;
+        var sanitizer = window.ZiaSanitize;
+        // fetch 실패·0건·id 부재·sanitizer 부재 → "글을 찾을 수 없습니다"
+        // (본 페이지는 정적 폴백 콘텐츠가 없는 동적 페이지 — notfound 가 곧 폴백 상태)
+        if (!row || !sanitizer) { postShow('notfound'); return; }
+
+        var badge = document.getElementById('post-badge');
+        if (badge && row.badge) {
+            badge.textContent = row.badge;
+            badge.style.display = '';
+        }
+        var titleEl = document.getElementById('post-title');
+        if (titleEl) { titleEl.textContent = row.title || ''; }
+        if (row.title) { document.title = row.title + ' — 지아한의원'; }
+        setText(qs('#post-zone'), row.zone_name);
+        setText(qs('#post-date'), fmtDate(row.published_at));
+
+        // 본문 — 렌더 직전 admin 과 동일 화이트리스트로 재-sanitize (이중 방어).
+        // sanitize 산출물만 innerHTML 진입 (원문 결합 금지).
+        var bodyEl = document.getElementById('post-body');
+        if (bodyEl) { bodyEl.innerHTML = sanitizer.sanitize(row.body_html || ''); }
+
+        // 블로그 원문 보기 (http/https 만)
+        var ext = document.getElementById('post-external');
+        var extUrl = (row.external_url || '').trim();
+        if (ext && /^https?:/.test(extUrl)) {
+            ext.setAttribute('href', extUrl);
+            ext.style.display = '';
+        }
+        // 목록으로 — 소속 ZONE 상세 페이지가 구축돼 있으면 그리로, 아니면 홈 유지
+        var back = document.getElementById('post-back');
+        if (back && zones) {
+            var zone = null;
+            zones.forEach(function (z) { if (!zone && z.slug === row.zone_slug) { zone = z; } });
+            if (zone && zone.page_path && BUILT_ZONE_PAGES.indexOf(zone.page_path) !== -1) {
+                back.setAttribute('href', resolvePage(zone.page_path));
+            }
+        }
+        postShow('article');
+    }
+
+    // ========================================================================
     // 오케스트레이션 — fetch 병렬 시작 → DOMContentLoaded 이후 주입
     // ========================================================================
     function apply(d) {
@@ -905,6 +1007,8 @@
             safe(function () { injectReviewGrid(d.reviews || [], S); });
         } else if (KIND === 'location') {
             safe(function () { injectLocation(S); });
+        } else if (KIND === 'post') {
+            safe(function () { injectPostDetail(d.postDetail, zones); });
         }
         // about: 공통(C1~C9)만 — 본문 편집은 계약 v1.0 스코프 제외 (계약 §3 about)
     }
@@ -931,7 +1035,12 @@
             }));
         };
 
-    Promise.all([domReady, settleAll(keys.map(function (k) { return fetchRows(SOURCES[k]); }))])
+    // 글 상세 fetch (post.html 전용) — id 없으면 즉시 null (notfound 경로)
+    var detailPromise = (KIND === 'post' && POST_ID)
+        ? fetchRows('v_public_post_detail?select=*&id=eq.' + POST_ID + '&limit=1')
+        : Promise.resolve(null);
+
+    Promise.all([domReady, settleAll(keys.map(function (k) { return fetchRows(SOURCES[k]); })), detailPromise])
         .then(function (out) {
             var results = out[1];
             var data = {};
@@ -939,6 +1048,7 @@
                 var r = results[i];
                 data[k] = (r && r.status === 'fulfilled') ? r.value : null;
             });
+            data.postDetail = out[2];
             safe(function () { apply(data); });
         });
 })();

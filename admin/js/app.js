@@ -132,6 +132,142 @@
     return z ? z.name : "";
   }
 
+  /* ════════════════════════ 이미지 업로드 공용 (P3-d) ════════════════════════ */
+
+  var IMG_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/avif": "avif", "image/bmp": "bmp" };
+
+  function storagePublicUrl(path) {
+    return cfg.supabaseUrl + "/storage/v1/object/public/zia-media/" + encodeURI(path);
+  }
+
+  // 관리자 화면 미리보기 URL (/static → 사이트 상대경로 — 배포 배치상 관리자 = 사이트 하위 /admin/)
+  function adminImageUrl(p) {
+    if (!p) return "";
+    if (/^https?:/.test(p)) return p;
+    if (p.indexOf("/static/") === 0) return ".." + p;
+    return storagePublicUrl(String(p).replace(/^\/+/, ""));
+  }
+
+  // 파일/Blob → storage zia-media 업로드 → { path, url }. 경로 = {folder}/{timestamp}-{rand}.{ext}
+  function uploadImage(blob, folder) {
+    var type = blob.type || "";
+    var ext = IMG_EXT[type];
+    if (!ext) return Promise.reject(new Error("unsupported image type: " + type));
+    var path = folder + "/" + Date.now() + "-" + Math.random().toString(36).slice(2, 8) + "." + ext;
+    return sb.storage.from("zia-media").upload(path, blob, { contentType: type, cacheControl: "3600" })
+      .then(function (res) {
+        if (res.error) throw res.error;
+        return { path: path, url: storagePublicUrl(path) };
+      });
+  }
+
+  // 드래그&드롭 + 클릭 파일선택 공용 배선. onFiles = 이미지 파일 배열 콜백
+  function bindDropUpload(dropEl, inputEl, onFiles) {
+    function pick(list) {
+      var files = Array.prototype.filter.call(list || [], function (f) { return IMG_EXT[f.type]; });
+      if (files.length) onFiles(files);
+      else toast("이미지 파일(jpg·png 등)만 넣을 수 있어요", "error");
+    }
+    dropEl.addEventListener("click", function () { inputEl.click(); });
+    inputEl.addEventListener("change", function () {
+      if (inputEl.files.length) { pick(inputEl.files); inputEl.value = ""; }
+    });
+    ["dragenter", "dragover"].forEach(function (t) {
+      dropEl.addEventListener(t, function (e) { e.preventDefault(); e.stopPropagation(); dropEl.classList.add("drag-on"); });
+    });
+    ["dragleave", "drop"].forEach(function (t) {
+      dropEl.addEventListener(t, function (e) { e.preventDefault(); e.stopPropagation(); dropEl.classList.remove("drag-on"); });
+    });
+    dropEl.addEventListener("drop", function (e) {
+      if (e.dataTransfer && e.dataTransfer.files.length) pick(e.dataTransfer.files);
+    });
+  }
+
+  // 단일 이미지 드래그 존 (글 썸네일 · ZONE 대표 이미지 공용).
+  // opts: { value, folder, emptyText, onChange(path|null) } — onChange는 업로드 완료/빼기 후 호출.
+  function imageDropControl(container, opts) {
+    var current = opts.value || null;
+    function draw(uploading) {
+      container.innerHTML =
+        '<div class="img-drop' + (current ? " has-img" : "") + '">' +
+        (current && !uploading
+          ? '<img class="img-drop-preview" src="' + esc(adminImageUrl(current)) + '" alt="">'
+          : "") +
+        '<span class="img-drop-hint">' +
+        (uploading ? "사진 올리는 중…" : current ? "사진을 끌어다 놓거나 눌러서 바꾸기" : esc(opts.emptyText || "사진을 끌어다 놓거나 눌러서 고르기")) +
+        "</span></div>" +
+        (current && !uploading ? '<button type="button" class="btn-ghost btn-sm img-drop-clear">사진 빼기</button>' : "") +
+        '<input type="file" accept="image/*" class="hidden">';
+      var drop = container.querySelector(".img-drop");
+      var input = container.querySelector("input[type=file]");
+      bindDropUpload(drop, input, function (files) {
+        draw(true);
+        uploadImage(files[0], opts.folder).then(function (up) {
+          current = up.path;
+          draw(false);
+          opts.onChange(current);
+        }).catch(function (err) {
+          console.error("[admin] upload error:", err);
+          toast("사진을 올리지 못했어요. 다시 시도해 주세요.", "error");
+          draw(false);
+        });
+      });
+      var clearBtn = container.querySelector(".img-drop-clear");
+      if (clearBtn) {
+        clearBtn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          current = null;
+          draw(false);
+          opts.onChange(null);
+        });
+      }
+    }
+    draw(false);
+    return { get: function () { return current; } };
+  }
+
+  /* ── 붙여넣기 에디터 헬퍼 (P3-d B1) ── */
+
+  // plain text → <p> 단락 html (줄 단위, esc 필수)
+  function textToHtmlParas(text) {
+    return String(text || "").split(/\r?\n/).map(function (line) {
+      line = line.trim();
+      return line ? "<p>" + esc(line) + "</p>" : "";
+    }).join("");
+  }
+
+  // sanitize 완료된 html만 진입 허용 (원문 결합 금지) — 캐럿 위치에 삽입
+  function insertHtmlAtCaret(editor, html) {
+    editor.focus();
+    var sel = window.getSelection();
+    var range;
+    if (!sel.rangeCount || !editor.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    range = sel.getRangeAt(0);
+    range.deleteContents();
+    var tmp = document.createElement("div");
+    tmp.innerHTML = html;
+    var frag = document.createDocumentFragment();
+    var lastNode = null;
+    while (tmp.firstChild) lastNode = frag.appendChild(tmp.firstChild);
+    range.insertNode(frag);
+    if (lastNode) {
+      range.setStartAfter(lastNode);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
+
+  function dataUrlToBlob(dataUrl) {
+    return fetch(dataUrl).then(function (r) { return r.blob(); });
+  }
+
   /* ════════════════════════ 라우터 ════════════════════════ */
 
   function render() {
@@ -140,9 +276,13 @@
     var m;
     if (h === "#/" || h === "" || h === "#") viewDashboard();
     else if (h === "#/zones") viewZones();
+    else if (h === "#/home") viewHome();
     else if (h === "#/posts") viewPosts();
     else if (h === "#/posts/new") viewPostEdit(null);
     else if ((m = h.match(/^#\/posts\/(\d+)$/))) viewPostEdit(Number(m[1]));
+    else if (h === "#/faqs") viewFaqs();
+    else if (h === "#/faqs/new") viewFaqEdit(null);
+    else if ((m = h.match(/^#\/faqs\/(\d+)$/))) viewFaqEdit(Number(m[1]));
     else if (h === "#/reviews") viewReviews();
     else if (h === "#/reviews/new") viewReviewEdit(null);
     else if ((m = h.match(/^#\/reviews\/(\d+)$/))) viewReviewEdit(Number(m[1]));
@@ -181,7 +321,9 @@
       '<p class="view-desc">바꾸고 싶은 항목을 눌러 주세요.</p>' +
       '<div class="dash-grid">' +
       dashCard("#/zones", "분", "진료 분야 관리", "홈페이지에 보여줄 진료 분야를 켜고 끕니다") +
-      dashCard("#/posts", "글", "글 관리", "진료 사례와 소식 글을 쓰고 고칩니다") +
+      dashCard("#/home", "홈", "홈 화면 관리", "홈 첫 화면 칸에 보여줄 글을 골라 담습니다") +
+      dashCard("#/posts", "글", "글 관리", "블로그 글을 붙여넣어 올리고 고칩니다") +
+      dashCard("#/faqs", "질", "자주 묻는 질문", "질문·답변을 쓰고 순서를 바꿉니다") +
       dashCard("#/reviews", "후", "후기 관리", "후기 카드를 쓰고 발행합니다 (표현 자동 검사)") +
       dashCard("#/settings", "정", "병원 정보", "전화번호·진료시간·주소를 바꿉니다") +
       "</div>";
@@ -231,7 +373,8 @@
         zoneSwitch(z, "is_visible", "홈페이지 노출", false) +
         zoneSwitch(z, "is_primary", "대표 분야", !z.is_visible) +
         zoneSwitch(z, "show_in_home_tabs", "홈 진료탭", !z.is_visible) +
-        "</div>" + lockHint + "</div>";
+        "</div>" + lockHint +
+        '<div class="zone-hero" data-role="hero"></div></div>';
     });
 
     root().innerHTML = html;
@@ -243,6 +386,13 @@
         input.addEventListener("change", function () {
           onZoneToggle(zone, input.getAttribute("data-field"), input.checked, input);
         });
+      });
+      // 대표 이미지 (홈 진료탭 패널) — 드래그/클릭 교체 (P3-d B4, 저장 즉시 반영)
+      imageDropControl(row.querySelector('[data-role="hero"]'), {
+        value: zone.hero_image_path,
+        folder: "zones",
+        emptyText: "대표 사진 넣기 (홈 진료탭 패널에 나와요)",
+        onChange: function (path) { updateZone(zone, { hero_image_path: path }); }
       });
     });
   }
@@ -400,11 +550,23 @@
       '<p class="help">이 글과 관련 있는 태그에 표시해 주세요. 고른 분야의 태그만 나와요.</p></div>' +
       '<div class="field"><label for="post-badge">카드 라벨 <span style="font-weight:400;color:var(--muted)">(선택)</span></label>' +
       '<input type="text" id="post-badge" value="' + esc(isEdit ? post.badge || "" : "") + '" placeholder="예: 공황장애 — 홈페이지 카드에 크게 표시되는 짧은 말"></div>' +
-      '<div class="field"><label for="post-body">내용 <span style="font-weight:400;color:var(--muted)">(선택)</span></label>' +
-      '<textarea id="post-body" placeholder="글 내용을 적어 주세요.">' + esc(isEdit ? post.body || "" : "") + "</textarea></div>" +
-      '<div class="field"><label for="post-url">연결할 블로그 주소 <span style="font-weight:400;color:var(--muted)">(선택)</span></label>' +
+      '<div class="field"><label for="post-editor">내용 <span style="font-weight:400;color:var(--muted)">(선택)</span></label>' +
+      '<div class="editor-bar">' +
+      '<button type="button" class="btn-secondary btn-sm" id="post-img-btn">사진 넣기</button>' +
+      '<button type="button" class="btn-ghost btn-sm" id="post-preview-btn">미리보기</button>' +
+      '<span class="editor-status" id="post-editor-status"></span>' +
+      "</div>" +
+      '<div id="post-editor" class="rich-editor" contenteditable="true" data-placeholder="블로그 글을 복사해서 여기에 붙여넣으세요. 직접 써도 돼요."></div>' +
+      '<div id="post-preview" class="post-preview hidden"></div>' +
+      '<input type="file" id="post-img-file" accept="image/*" multiple class="hidden">' +
+      '<p class="help">블로그 글을 그대로 붙여넣으면 제목·굵은 글씨·사진이 함께 들어와요. ' +
+      "사진은 자동으로 홈페이지 저장소에 옮겨 드려요. 못 가져온 사진 자리는 \"사진 넣기\"로 다시 넣어 주세요.</p></div>" +
+      '<div class="field"><label>목록 사진(썸네일) <span style="font-weight:400;color:var(--muted)">(선택)</span></label>' +
+      '<div id="post-thumb"></div>' +
+      '<p class="help">홈·목록 카드의 배경으로 쓰이는 대표 사진이에요.</p></div>' +
+      '<div class="field"><label for="post-url">블로그 원문 링크 <span style="font-weight:400;color:var(--muted)">(선택)</span></label>' +
       '<input type="url" id="post-url" value="' + esc(isEdit ? post.external_url || "" : "") + '" placeholder="https:// 로 시작하는 주소">' +
-      '<p class="help">주소를 넣으면 홈페이지에서 이 카드를 눌렀을 때 해당 글로 이동해요.</p></div>' +
+      '<p class="help">주소를 넣으면 홈페이지 카드를 눌렀을 때 블로그 원문이 새 창으로 열려요. 비워 두고 내용을 쓰면 홈페이지 안 글 페이지로 열려요.</p></div>' +
       '<div class="field"><label for="post-order">표시 순서 <span style="font-weight:400;color:var(--muted)">(선택)</span></label>' +
       '<input type="number" id="post-order" value="' + (isEdit ? post.sort_order : 0) + '" style="max-width:140px">' +
       '<p class="help">숫자가 작을수록 앞에 나와요. 잘 모르겠으면 그대로 두세요.</p></div>' +
@@ -419,6 +581,134 @@
       renderPostTagChecks(Number(this.value) || null, []); // 분야 변경 → 태그 초기화 (§7.1)
     });
 
+    /* ── 본문 에디터 (P3-d B1: 붙여넣기 + sanitize + 이미지 사다리) ── */
+    var editor = byId("post-editor");
+    var statusEl = byId("post-editor-status");
+    var pendingUploads = 0;
+    try { document.execCommand("defaultParagraphSeparator", false, "p"); } catch (e) { /* 미지원 무해 */ }
+
+    if (isEdit && post.body_html) {
+      editor.innerHTML = ZiaSanitize.sanitize(post.body_html); // 표시 전 재-sanitize (이중 방어)
+    } else if (isEdit && post.body) {
+      editor.innerHTML = textToHtmlParas(post.body); // 텍스트 본문 구버전 호환
+    }
+
+    function setUploadStatus() {
+      statusEl.textContent = pendingUploads > 0 ? "사진 올리는 중… (" + pendingUploads + "장 남음)" : "";
+    }
+
+    // 못 가져온 이미지 → 안내 placeholder (텍스트라 저장 시 sanitize를 통과해 남음 — 의도)
+    function replaceWithImgNote(img) {
+      var p = document.createElement("p");
+      p.className = "img-missing";
+      p.textContent = "[사진을 가져오지 못했어요 — 이 자리는 '사진 넣기'로 다시 넣어 주세요]";
+      if (img.parentNode) img.parentNode.replaceChild(p, img);
+    }
+
+    // 붙여넣은 이미지 사다리: ① data URL → Blob 업로드 ② 외부 http(s) → fetch(CORS 허용 시) 업로드
+    // ③ 실패 → placeholder 안내. 저장소(supabase) URL은 그대로 둔다.
+    function processEditorImages() {
+      Array.prototype.slice.call(editor.querySelectorAll("img")).forEach(function (img) {
+        var src = img.getAttribute("src") || "";
+        if (src.indexOf(cfg.supabaseUrl) === 0 || img.getAttribute("data-busy")) return;
+        var job;
+        if (src.indexOf("data:image/") === 0) {
+          job = dataUrlToBlob(src);
+        } else if (/^https?:/.test(src)) {
+          job = fetch(src, { mode: "cors" }).then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.blob();
+          }).then(function (blob) {
+            if (!IMG_EXT[blob.type]) throw new Error("not image: " + blob.type);
+            return blob;
+          });
+        } else {
+          replaceWithImgNote(img);
+          return;
+        }
+        img.setAttribute("data-busy", "1");
+        pendingUploads++;
+        setUploadStatus();
+        job.then(function (blob) { return uploadImage(blob, "posts"); })
+          .then(function (up) {
+            img.setAttribute("src", up.url);
+            img.removeAttribute("data-busy");
+          })
+          .catch(function (err) {
+            console.warn("[admin] 이미지 가져오기 실패:", err);
+            replaceWithImgNote(img);
+          })
+          .then(function () { pendingUploads--; setUploadStatus(); });
+      });
+    }
+
+    editor.addEventListener("paste", function (e) {
+      e.preventDefault();
+      var cd = e.clipboardData || window.clipboardData;
+      if (!cd) return;
+      var html = cd.getData ? cd.getData("text/html") : "";
+      var clean = html
+        ? ZiaSanitize.sanitize(html)
+        : textToHtmlParas(cd.getData ? cd.getData("text/plain") : cd.getData("Text"));
+      if (clean) insertHtmlAtCaret(editor, clean);
+      // 클립보드에 파일로만 담긴 이미지 (화면 캡처 붙여넣기)
+      if (cd.files && cd.files.length) {
+        Array.prototype.slice.call(cd.files).filter(function (f) { return IMG_EXT[f.type]; }).forEach(insertImageFile);
+      }
+      processEditorImages();
+    });
+    editor.addEventListener("dragover", function (e) { e.preventDefault(); editor.classList.add("drag-on"); });
+    editor.addEventListener("dragleave", function () { editor.classList.remove("drag-on"); });
+    editor.addEventListener("drop", function (e) {
+      e.preventDefault();
+      editor.classList.remove("drag-on");
+      var files = e.dataTransfer ? Array.prototype.slice.call(e.dataTransfer.files) : [];
+      var imgs = files.filter(function (f) { return IMG_EXT[f.type]; });
+      if (!imgs.length) { toast("이미지 파일(jpg·png 등)만 넣을 수 있어요", "error"); return; }
+      imgs.forEach(insertImageFile);
+    });
+
+    function insertImageFile(file) {
+      pendingUploads++;
+      setUploadStatus();
+      uploadImage(file, "posts").then(function (up) {
+        insertHtmlAtCaret(editor, '<img src="' + esc(up.url) + '">');
+      }).catch(function (err) {
+        console.error("[admin] upload error:", err);
+        toast("사진을 올리지 못했어요. 다시 시도해 주세요.", "error");
+      }).then(function () { pendingUploads--; setUploadStatus(); });
+    }
+    byId("post-img-btn").addEventListener("click", function () { byId("post-img-file").click(); });
+    byId("post-img-file").addEventListener("change", function () {
+      Array.prototype.slice.call(this.files).filter(function (f) { return IMG_EXT[f.type]; }).forEach(insertImageFile);
+      this.value = "";
+    });
+
+    // 미리보기 토글 (사이트 유사 타이포 — .post-preview)
+    var previewOn = false;
+    byId("post-preview-btn").addEventListener("click", function () {
+      previewOn = !previewOn;
+      var pv = byId("post-preview");
+      if (previewOn) {
+        pv.innerHTML = ZiaSanitize.sanitize(editor.innerHTML) || '<p class="help">아직 내용이 없어요.</p>';
+        pv.classList.remove("hidden");
+        editor.classList.add("hidden");
+        this.textContent = "다시 쓰기";
+      } else {
+        pv.classList.add("hidden");
+        editor.classList.remove("hidden");
+        this.textContent = "미리보기";
+      }
+    });
+
+    // 썸네일 드래그 존 (저장 버튼 시점에 payload 반영)
+    var thumbCtl = imageDropControl(byId("post-thumb"), {
+      value: isEdit ? post.thumbnail_path : null,
+      folder: "posts",
+      emptyText: "사진을 끌어다 놓거나 눌러서 고르기",
+      onChange: function () { /* 폼 저장 시 반영 */ }
+    });
+
     var actions = byId("post-actions");
     if (isEdit && post.published) {
       actions.innerHTML =
@@ -429,7 +719,7 @@
         var self = this;
         confirmModal({
           title: "발행을 중지할까요?",
-          body: "홈페이지에서 이 글이 안 보이게 돼요. 글 자체는 지워지지 않고 임시저장으로 남아요.",
+          body: "홈페이지에서 이 글이 안 보이게 돼요. 홈 화면 칸에 담아 둔 경우 홈에서도 빠져요. 글 자체는 지워지지 않고 임시저장으로 남아요.",
           confirmLabel: "발행 중지"
         }).then(function (ok) { if (ok) savePost(post, false, self); });
       });
@@ -439,6 +729,68 @@
         '<button type="button" class="btn-primary" id="post-publish">발행하기</button>';
       byId("post-draft").addEventListener("click", function () { savePost(post, false, this); });
       byId("post-publish").addEventListener("click", function () { savePost(post, true, this); });
+    }
+
+    // 저장 (임시저장/발행 공용) — 본문은 sanitize된 HTML(body_html) + 텍스트 추출본(body) 동시 저장.
+    // ⚠ 글 본문에는 의료광고법 lint 미탑재 (사용자 결단 2026-07-22 — GUAVA 생성 단계 기검증.
+    //    후기(reviews)의 lint 하드게이트는 별개로 유지).
+    function savePost(existing, publish, btn) {
+      showFormError("post-form-error", null);
+      var title = byId("post-title").value.trim();
+      var zoneId = Number(byId("post-zone").value) || null;
+      if (!title) { showFormError("post-form-error", "제목을 입력해 주세요."); return; }
+      if (!zoneId) { showFormError("post-form-error", "진료 분야를 골라 주세요."); return; }
+      if (pendingUploads > 0) {
+        showFormError("post-form-error", "사진을 올리는 중이에요. 위 안내가 사라진 뒤 다시 눌러 주세요.");
+        return;
+      }
+
+      var bodyHtml = ZiaSanitize.sanitize(editor.innerHTML);
+      var bodyText = ZiaSanitize.toText(bodyHtml);
+      if (!bodyText && !/<img[\s>]/.test(bodyHtml)) bodyHtml = ""; // 글자·사진 모두 없음 → 빈 본문
+
+      var tagIds = Array.prototype.map.call(
+        byId("post-tags").querySelectorAll("input:checked"),
+        function (i) { return Number(i.value); }
+      );
+      var payload = {
+        zone_id: zoneId,
+        title: title,
+        badge: byId("post-badge").value.trim() || null,
+        body: bodyText || null,
+        body_html: bodyHtml || null,
+        thumbnail_path: thumbCtl.get() || null,
+        external_url: byId("post-url").value.trim() || null,
+        sort_order: Number(byId("post-order").value) || 0,
+        published: publish,
+        published_at: publish ? (existing && existing.published_at) || new Date().toISOString() : (existing && existing.published_at) || null
+      };
+      if (!publish) payload.home_slot = null; // 발행 중지/임시저장 → 홈 캐러셀 칸에서 제외
+
+      busy(btn, true, "저장 중…");
+      var q = existing
+        ? sb.from("posts").update(payload).eq("id", existing.id).select("id").single()
+        : sb.from("posts").insert(payload).select("id").single();
+
+      q.then(function (res) {
+        if (res.error) throw res.error;
+        var postId = res.data.id;
+        // 태그 동기화: 기존 연결 삭제 후 재삽입 (§7.1 트리거가 분야 일치 검증)
+        return sb.from("post_tags").delete().eq("post_id", postId).then(function (delRes) {
+          if (delRes.error) throw delRes.error;
+          if (!tagIds.length) return null;
+          return sb.from("post_tags").insert(tagIds.map(function (tid) {
+            return { post_id: postId, tag_id: tid };
+          })).then(function (insRes) { if (insRes.error) throw insRes.error; });
+        });
+      }).then(function () {
+        busy(btn, false);
+        toast(publish ? "발행되었습니다. 홈페이지에 반영돼요." : "임시저장되었습니다. 홈페이지에는 아직 안 보여요.");
+        location.hash = "#/posts";
+      }).catch(function (err) {
+        busy(btn, false);
+        dbError(err);
+      });
     }
   }
 
@@ -472,51 +824,413 @@
     else el.classList.add("hidden");
   }
 
-  function savePost(existing, publish, btn) {
-    showFormError("post-form-error", null);
-    var title = byId("post-title").value.trim();
-    var zoneId = Number(byId("post-zone").value) || null;
-    if (!title) { showFormError("post-form-error", "제목을 입력해 주세요."); return; }
-    if (!zoneId) { showFormError("post-form-error", "진료 분야를 골라 주세요."); return; }
+  /* ════════════════════════ 홈 화면 관리 (P3-d B2 — 슬롯 픽커) ════════════════════════ */
 
-    var tagIds = Array.prototype.map.call(
-      byId("post-tags").querySelectorAll("input:checked"),
-      function (i) { return Number(i.value); }
-    );
-    var payload = {
-      zone_id: zoneId,
-      title: title,
-      badge: byId("post-badge").value.trim() || null,
-      body: byId("post-body").value.trim() || null,
-      external_url: byId("post-url").value.trim() || null,
-      sort_order: Number(byId("post-order").value) || 0,
-      published: publish,
-      published_at: publish ? (existing && existing.published_at) || new Date().toISOString() : (existing && existing.published_at) || null
-    };
+  var HOME_SLOT_COUNT = 6; // 홈 §5 캐러셀 정적 데모 카드 수와 동일
+  var homeTabZoneId = null; // 탭 선택 유지
 
-    busy(btn, true, "저장 중…");
-    var q = existing
-      ? sb.from("posts").update(payload).eq("id", existing.id).select("id").single()
-      : sb.from("posts").insert(payload).select("id").single();
+  // 홈 진료탭 정렬 — cms-inject.js byHomeTabOrder 와 동일 규칙
+  function byHomeTabOrder(a, b) {
+    var ao = (a.home_tab_order == null) ? 9999 : a.home_tab_order;
+    var bo = (b.home_tab_order == null) ? 9999 : b.home_tab_order;
+    return (ao - bo) || (a.sort_order - b.sort_order) || (a.id - b.id);
+  }
 
-    q.then(function (res) {
-      if (res.error) throw res.error;
-      var postId = res.data.id;
-      // 태그 동기화: 기존 연결 삭제 후 재삽입 (§7.1 트리거가 분야 일치 검증)
-      return sb.from("post_tags").delete().eq("post_id", postId).then(function (delRes) {
-        if (delRes.error) throw delRes.error;
-        if (!tagIds.length) return null;
-        return sb.from("post_tags").insert(tagIds.map(function (tid) {
-          return { post_id: postId, tag_id: tid };
-        })).then(function (insRes) { if (insRes.error) throw insRes.error; });
+  function viewHome() {
+    loadingView();
+    Promise.all([
+      loadZones(true),
+      sb.from("posts").select("*").order("sort_order").order("id").then(function (res) {
+        if (res.error) throw res.error;
+        return res.data || [];
+      })
+    ]).then(function (results) {
+      renderHome(results[1]);
+    }).catch(loadFailView);
+  }
+
+  function renderHome(posts) {
+    var tabZones = state.zones.filter(function (z) { return z.show_in_home_tabs; }).sort(byHomeTabOrder);
+    var html =
+      backLink("#/", "처음으로") +
+      '<h1 class="view-title">홈 화면 관리</h1>' +
+      '<p class="view-desc">홈 첫 화면 "진료 소개"에 나올 글을 정해요. 분야(탭)마다 <b>6칸</b>이 있어요.<br>' +
+      "빈 칸을 누르면 글을 골라 담을 수 있고, 채워진 칸을 누르면 바꾸거나 뺄 수 있어요.</p>";
+
+    if (!tabZones.length) {
+      html += '<div class="notice-info">홈 진료탭에 켜진 분야가 없어요. 먼저 "진료 분야 관리"에서 <b>홈 진료탭</b> 스위치를 켜 주세요.</div>' +
+        '<button type="button" class="btn-secondary" data-nav="#/zones">진료 분야 관리로 가기</button>';
+      root().innerHTML = html;
+      bindNav(root());
+      return;
+    }
+    if (homeTabZoneId == null || !tabZones.some(function (z) { return z.id === homeTabZoneId; })) {
+      homeTabZoneId = tabZones[0].id;
+    }
+    html += '<div class="home-tabs">' + tabZones.map(function (z) {
+      return '<button type="button" class="home-tab' + (z.id === homeTabZoneId ? " active" : "") +
+        '" data-zone="' + z.id + '">' + esc(z.tab_label || z.name) + "</button>";
+    }).join("") + "</div>" +
+      '<div id="home-slots" class="slot-grid"></div>';
+
+    root().innerHTML = html;
+    bindNav(root());
+    root().querySelectorAll(".home-tab").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        homeTabZoneId = Number(btn.getAttribute("data-zone"));
+        renderHome(posts);
+      });
+    });
+    drawHomeSlots(posts);
+  }
+
+  function drawHomeSlots(posts) {
+    var zone = state.zones.find(function (z) { return z.id === homeTabZoneId; });
+    var box = byId("home-slots");
+    function slotPost(n) {
+      return posts.find(function (x) { return x.zone_id === zone.id && x.home_slot === n; });
+    }
+    var html = "";
+    for (var n = 1; n <= HOME_SLOT_COUNT; n++) {
+      var p = slotPost(n);
+      html += p
+        ? '<button type="button" class="slot-card filled" data-slot="' + n + '">' +
+          '<span class="slot-no">' + n + "번 칸</span>" +
+          (p.thumbnail_path
+            ? '<img class="slot-thumb" src="' + esc(adminImageUrl(p.thumbnail_path)) + '" alt="">'
+            : '<span class="slot-thumb slot-thumb-empty"></span>') +
+          '<span class="slot-title">' + esc(p.title) + "</span>" +
+          (!p.published ? '<span class="pill pill-fail">발행 중지됨</span>' : "") +
+          "</button>"
+        : '<button type="button" class="slot-card slot-empty" data-slot="' + n + '">' +
+          '<span class="slot-no">' + n + '번 칸</span><span class="slot-add">+ 글 선택</span></button>';
+    }
+    box.innerHTML = html;
+    box.querySelectorAll(".slot-card").forEach(function (el) {
+      var slotNo = Number(el.getAttribute("data-slot"));
+      el.addEventListener("click", function () {
+        var cur = slotPost(slotNo);
+        if (cur) openSlotActions(zone, slotNo, cur, posts);
+        else openHomePicker(zone, slotNo, null, posts);
+      });
+    });
+  }
+
+  // 슬롯에 담을 글 고르기 모달. replacing = 현재 슬롯 글 (교체 흐름이면 지정)
+  function openHomePicker(zone, slotNo, replacing, posts) {
+    var zonePosts = posts.filter(function (p) {
+      return p.zone_id === zone.id && (!replacing || p.id !== replacing.id);
+    });
+    var listHtml;
+    if (!zonePosts.length) {
+      listHtml = '<p class="empty-note">이 분야에는 아직 글이 없어요.<br>"글 관리"에서 먼저 글을 써 주세요.</p>';
+    } else {
+      // 발행 글 = 선택 가능 / 미발행 글 = 흐리게 + 선택 불가 (먼저 발행 안내)
+      listHtml = '<div class="pick-list">' + zonePosts.map(function (p) {
+        var inSlot = p.home_slot != null
+          ? '<span class="pill pill-star">' + p.home_slot + "번 칸에 있음</span>" : "";
+        return p.published
+          ? '<button type="button" class="pick-item" data-id="' + p.id + '">' +
+            '<span class="pick-title">' + esc(p.title) + "</span>" +
+            '<span class="pick-meta"><span class="pill pill-live">발행 중</span>' + inSlot + "</span></button>"
+          : '<div class="pick-item disabled">' +
+            '<span class="pick-title">' + esc(p.title) + "</span>" +
+            '<span class="pick-meta"><span class="pill pill-draft">임시저장</span>' +
+            '<span class="pick-note">먼저 발행해 주세요</span></span></div>';
+      }).join("") + "</div>";
+    }
+    var overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML =
+      '<div class="modal modal-wide" role="dialog" aria-modal="true">' +
+      "<h2>" + esc((zone.tab_label || zone.name) + " · " + slotNo + "번 칸에 담을 글") + "</h2>" +
+      listHtml +
+      '<div class="modal-actions"><button type="button" class="btn-ghost" data-act="cancel">닫기</button></div>' +
+      "</div>";
+    function close() { overlay.remove(); document.removeEventListener("keydown", onKey); }
+    function onKey(e) { if (e.key === "Escape") close(); }
+    overlay.addEventListener("click", function (e) {
+      if (e.target === overlay) { close(); return; }
+      var act = e.target.getAttribute && e.target.getAttribute("data-act");
+      if (act === "cancel") { close(); return; }
+      var item = e.target.closest ? e.target.closest(".pick-item") : null;
+      if (!item || item.classList.contains("disabled")) return;
+      var id = Number(item.getAttribute("data-id"));
+      close();
+      assignHomeSlot(slotNo, id, replacing);
+    });
+    document.addEventListener("keydown", onKey);
+    byId("modal-root").appendChild(overlay);
+  }
+
+  function assignHomeSlot(slotNo, postId, replacing) {
+    // 교체 흐름: 기존 글 칸 비우기 → 새 글 담기 (순차 — zone 내 칸 중복 금지 인덱스와 정합)
+    var clear = replacing
+      ? sb.from("posts").update({ home_slot: null }).eq("id", replacing.id).then(function (res) {
+          if (res.error) throw res.error;
+        })
+      : Promise.resolve();
+    clear.then(function () {
+      return sb.from("posts").update({ home_slot: slotNo }).eq("id", postId).then(function (res) {
+        if (res.error) throw res.error;
       });
     }).then(function () {
-      busy(btn, false);
-      toast(publish ? "발행되었습니다. 홈페이지에 반영돼요." : "임시저장되었습니다. 홈페이지에는 아직 안 보여요.");
-      location.hash = "#/posts";
+      toast("홈 화면에 담았어요. 바로 반영돼요.");
+      viewHome();
     }).catch(function (err) {
-      busy(btn, false);
       dbError(err);
+      viewHome();
+    });
+  }
+
+  // 채워진 슬롯: 다른 글로 바꾸기 / 홈에서 빼기 / 닫기
+  function openSlotActions(zone, slotNo, post, posts) {
+    var overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML =
+      '<div class="modal" role="dialog" aria-modal="true">' +
+      "<h2>" + slotNo + "번 칸: " + esc(post.title) + "</h2>" +
+      "<p>이 칸을 어떻게 할까요?</p>" +
+      '<div class="modal-actions modal-actions-col">' +
+      '<button type="button" class="btn-primary" data-act="swap">다른 글로 바꾸기</button>' +
+      '<button type="button" class="btn-danger" data-act="remove">홈에서 빼기</button>' +
+      '<button type="button" class="btn-ghost" data-act="cancel">닫기</button>' +
+      "</div></div>";
+    function close() { overlay.remove(); document.removeEventListener("keydown", onKey); }
+    function onKey(e) { if (e.key === "Escape") close(); }
+    overlay.addEventListener("click", function (e) {
+      if (e.target === overlay) { close(); return; }
+      var act = e.target.getAttribute && e.target.getAttribute("data-act");
+      if (act === "cancel") { close(); return; }
+      if (act === "swap") { close(); openHomePicker(zone, slotNo, post, posts); return; }
+      if (act === "remove") {
+        close();
+        sb.from("posts").update({ home_slot: null }).eq("id", post.id).then(function (res) {
+          if (res.error) { dbError(res.error); viewHome(); return; }
+          toast("홈 화면에서 뺐어요. 글 자체는 그대로 있어요.");
+          viewHome();
+        });
+      }
+    });
+    document.addEventListener("keydown", onKey);
+    byId("modal-root").appendChild(overlay);
+  }
+
+  /* ════════════════════════ 자주 묻는 질문 관리 (P3-d B3) ════════════════════════ */
+
+  var faqsFilterZone = ""; // 카테고리 필터 유지
+
+  function faqZoneLabel(z) { return z.faq_label || z.name; }
+
+  function viewFaqs() {
+    loadingView();
+    Promise.all([
+      loadZones(true),
+      sb.from("faqs").select("*").order("zone_id").order("sort_order").order("id").then(function (res) {
+        if (res.error) throw res.error;
+        return res.data || [];
+      })
+    ]).then(function (results) {
+      renderFaqList(results[1]);
+    }).catch(loadFailView);
+  }
+
+  function renderFaqList(faqs) {
+    // 필터 탭: 전체 + (대표 zone ∪ 질문 보유 zone) — 대표(faq_label 보유) 우선
+    var hasFaq = {};
+    faqs.forEach(function (f) { hasFaq[f.zone_id] = true; });
+    var tabZones = state.zones.filter(function (z) { return z.is_primary || hasFaq[z.id]; });
+    tabZones.sort(function (a, b) {
+      return ((b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0)) || (a.sort_order - b.sort_order) || (a.id - b.id);
+    });
+    if (faqsFilterZone && !tabZones.some(function (z) { return String(z.id) === faqsFilterZone; })) {
+      faqsFilterZone = "";
+    }
+
+    var html =
+      backLink("#/", "처음으로") +
+      '<h1 class="view-title">자주 묻는 질문 관리</h1>' +
+      '<p class="view-desc">홈페이지 "자주 묻는 질문"에 나오는 내용이에요. ▲▼ 버튼으로 순서를 바꾸면 바로 저장돼요.</p>' +
+      '<div class="home-tabs">' +
+      '<button type="button" class="home-tab' + (faqsFilterZone === "" ? " active" : "") + '" data-zone="">전체</button>' +
+      tabZones.map(function (z) {
+        return '<button type="button" class="home-tab' + (String(z.id) === faqsFilterZone ? " active" : "") +
+          '" data-zone="' + z.id + '">' + esc(faqZoneLabel(z)) + "</button>";
+      }).join("") + "</div>" +
+      '<div class="topbar"><span></span><button type="button" class="btn-primary" data-nav="#/faqs/new">+ 새 질문 쓰기</button></div>' +
+      '<div id="faqs-list"></div>';
+    root().innerHTML = html;
+    bindNav(root());
+    root().querySelectorAll(".home-tab").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        faqsFilterZone = btn.getAttribute("data-zone");
+        renderFaqList(faqs);
+      });
+    });
+    drawFaqRows(faqs);
+  }
+
+  function drawFaqRows(faqs) {
+    var list = byId("faqs-list");
+    var zones = state.zones.filter(function (z) {
+      return !faqsFilterZone || String(z.id) === faqsFilterZone;
+    });
+    var html = "";
+    zones.forEach(function (z) {
+      var rows = faqs.filter(function (f) { return f.zone_id === z.id; }); // 쿼리가 sort_order,id 정렬
+      if (!rows.length) return;
+      if (!faqsFilterZone) html += '<h2 class="faq-group-title">' + esc(faqZoneLabel(z)) + "</h2>";
+      rows.forEach(function (f, i) {
+        html +=
+          '<div class="item-row" data-id="' + f.id + '">' +
+          '<div class="faq-move">' +
+          '<button type="button" class="btn-move" data-act="up"' + (i === 0 ? " disabled" : "") + ' aria-label="위로">▲</button>' +
+          '<button type="button" class="btn-move" data-act="down"' + (i === rows.length - 1 ? " disabled" : "") + ' aria-label="아래로">▼</button>' +
+          "</div>" +
+          '<div class="item-main">' +
+          '<div class="item-title">' + esc(f.question) + "</div>" +
+          '<div class="item-meta">' +
+          "<span>" + esc(faqZoneLabel(z)) + "</span>" +
+          (f.show_on_home ? '<span class="pill pill-star">홈 화면에도 표시</span>' : "") +
+          (!f.published ? '<span class="pill pill-draft">숨김</span>' : "") +
+          "</div></div>" +
+          '<div class="item-actions">' +
+          '<button type="button" class="btn-secondary btn-sm" data-act="edit">수정</button>' +
+          '<button type="button" class="btn-danger btn-sm" data-act="del">삭제</button>' +
+          "</div></div>";
+      });
+    });
+    list.innerHTML = html || '<p class="empty-note">아직 질문이 없어요. "새 질문 쓰기"를 눌러 시작해 보세요.</p>';
+
+    list.querySelectorAll(".item-row").forEach(function (row) {
+      var id = Number(row.getAttribute("data-id"));
+      var faq = faqs.find(function (f) { return f.id === id; });
+      row.querySelector('[data-act="edit"]').addEventListener("click", function () { location.hash = "#/faqs/" + id; });
+      row.querySelector('[data-act="del"]').addEventListener("click", function () {
+        confirmModal({
+          title: "정말 삭제할까요?",
+          body: '"' + (faq.question || "") + '" 질문이 완전히 지워져요. 되돌릴 수 없습니다.',
+          confirmLabel: "삭제", danger: true
+        }).then(function (ok) {
+          if (!ok) return;
+          sb.from("faqs").delete().eq("id", id).then(function (res) {
+            if (res.error) { dbError(res.error, "삭제하지 못했어요"); return; }
+            toast("삭제되었습니다");
+            viewFaqs();
+          });
+        });
+      });
+      row.querySelectorAll(".btn-move").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          moveFaq(faqs, faq, btn.getAttribute("data-act") === "up" ? -1 : 1);
+        });
+      });
+    });
+  }
+
+  // 카테고리 안 인접 순서 교환 → 위치 기준 sort_order 정규화 저장 (중복 sort_order 값에도 안전)
+  function moveFaq(faqs, faq, dir) {
+    var rows = faqs.filter(function (f) { return f.zone_id === faq.zone_id; });
+    var idx = rows.indexOf(faq);
+    var to = idx + dir;
+    if (idx === -1 || to < 0 || to >= rows.length) return;
+    var tmp = rows[idx]; rows[idx] = rows[to]; rows[to] = tmp;
+    var changes = [];
+    rows.forEach(function (f, i) {
+      if (f.sort_order !== i) changes.push({ id: f.id, sort_order: i });
+    });
+    Promise.all(changes.map(function (c) {
+      return sb.from("faqs").update({ sort_order: c.sort_order }).eq("id", c.id).then(function (res) {
+        if (res.error) throw res.error;
+      });
+    })).then(function () {
+      toast("순서를 바꿨어요. 홈페이지에 바로 반영돼요.");
+      viewFaqs(); // 재로드로 정합 보증
+    }).catch(function (err) {
+      dbError(err, "순서를 바꾸지 못했어요");
+      viewFaqs();
+    });
+  }
+
+  function viewFaqEdit(id) {
+    loadingView();
+    var jobs = [
+      loadZones(true),
+      // 카테고리 맨 뒤 순서 계산용 최소 조회
+      sb.from("faqs").select("id, zone_id, sort_order").then(function (res) {
+        if (res.error) throw res.error;
+        return res.data || [];
+      })
+    ];
+    if (id) {
+      jobs.push(sb.from("faqs").select("*").eq("id", id).single().then(function (res) {
+        if (res.error) throw res.error;
+        return res.data;
+      }));
+    }
+    Promise.all(jobs).then(function (results) {
+      renderFaqForm(results[2] || null, results[1]);
+    }).catch(loadFailView);
+  }
+
+  function renderFaqForm(faq, allFaqs) {
+    var isEdit = !!faq;
+    // 카테고리 select — 대표(faq_label 보유) zone 우선 표시
+    var primaries = state.zones.filter(function (z) { return z.is_primary; });
+    var others = state.zones.filter(function (z) { return !z.is_primary; });
+    function zoneOpt(z) {
+      return '<option value="' + z.id + '"' + (isEdit && faq.zone_id === z.id ? " selected" : "") + ">" +
+        esc(faqZoneLabel(z)) + "</option>";
+    }
+    var zoneOptions = '<option value="">카테고리를 골라 주세요</option>' +
+      primaries.map(zoneOpt).join("") + others.map(zoneOpt).join("");
+
+    root().innerHTML =
+      backLink("#/faqs", "질문 목록으로") +
+      '<h1 class="view-title">' + (isEdit ? "질문 수정" : "새 질문 쓰기") + "</h1>" +
+      '<div class="card">' +
+      '<div class="field"><label for="faq-q">질문</label>' +
+      '<input type="text" id="faq-q" value="' + esc(isEdit ? faq.question : "") + '" placeholder="예: 치료 기간은 얼마나 걸리나요?"></div>' +
+      '<div class="field"><label for="faq-a">답변</label>' +
+      '<textarea id="faq-a" placeholder="답변을 적어 주세요. 줄을 바꾸면 홈페이지에서도 줄이 바뀌어요.">' + esc(isEdit ? faq.answer : "") + "</textarea></div>" +
+      '<div class="field"><label for="faq-zone">카테고리</label>' +
+      '<select id="faq-zone">' + zoneOptions + "</select>" +
+      '<p class="help">자주 묻는 질문 페이지의 묶음이에요. 대표 분야가 위쪽에 나와요.</p></div>' +
+      '<div class="field"><label class="switch"><input type="checkbox" id="faq-home"' +
+      (isEdit && faq.show_on_home ? " checked" : "") + '><span class="slider"></span>' +
+      '<span class="switch-label">홈 화면에도 보이기</span></label>' +
+      '<p class="help">홈 첫 화면 "자주 묻는 질문"에도 나와요 (최대 4개).</p></div>' +
+      '<p class="field-error hidden" id="faq-form-error"></p>' +
+      '<div class="form-actions"><button type="button" class="btn-primary" id="faq-save">저장하기</button></div>' +
+      "</div>";
+    bindNav(root());
+
+    byId("faq-save").addEventListener("click", function () {
+      var btn = this;
+      showFormError("faq-form-error", null);
+      var q = byId("faq-q").value.trim();
+      var a = byId("faq-a").value.trim();
+      var zoneId = Number(byId("faq-zone").value) || null;
+      if (!q) { showFormError("faq-form-error", "질문을 입력해 주세요."); return; }
+      if (!a) { showFormError("faq-form-error", "답변을 입력해 주세요."); return; }
+      if (!zoneId) { showFormError("faq-form-error", "카테고리를 골라 주세요."); return; }
+      var payload = { zone_id: zoneId, question: q, answer: a, show_on_home: byId("faq-home").checked };
+      // 새 질문·카테고리 이동 → 해당 카테고리 맨 뒤 순서
+      if (!isEdit || faq.zone_id !== zoneId) {
+        var max = -1;
+        (allFaqs || []).forEach(function (f) {
+          if (f.zone_id === zoneId && (!isEdit || f.id !== faq.id) && f.sort_order > max) max = f.sort_order;
+        });
+        payload.sort_order = max + 1;
+      }
+      busy(btn, true, "저장 중…");
+      var qy = isEdit ? sb.from("faqs").update(payload).eq("id", faq.id) : sb.from("faqs").insert(payload);
+      qy.then(function (res) {
+        busy(btn, false);
+        if (res.error) { dbError(res.error); return; }
+        toast("저장되었습니다. 홈페이지에 바로 반영돼요.");
+        location.hash = "#/faqs";
+      });
     });
   }
 

@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="ko">
+    <head>
+        <meta http-equiv="X-UA-Compatible" content="IE=Edge" >
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+        <!-- =====================
+            공통 메타정보
+        ====================== -->
+         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>지아한의원</title>
+        <link rel="canonical" href="https://stemexone.com">
+        <link rel="icon" href="/zia-preview/static/images/favicon.png" type="image/png">
+        <link rel="apple-touch-icon" href="/zia-preview/static/images/apple-touch-icon.png">
+        <meta name="robots" content="noindex, nofollow">
+
+        <meta name="subject" content="지아한의원" />
+        <meta name="description" content="1:1 체질 맞춤 진료, 통증 클리닉, 추나요법, 교통사고 후유증, 다이어트 등 환자 중심의 따뜻한 진료를 제공하는 지아한의원입니다." />
+        <meta name="keywords" content="지아한의원, 한의원, 추나요법, 통증치료, 침치료, 한약, 다이어트한약, 교통사고한의원, 여성질환" />
+
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="지아한의원" />
+        <meta property="og:url" content="https://www.jia.com/" />
+        <meta property="og:image" content="https://www.jia.com/static/images/share.jpg" />
+        <meta property="og:description" content="1:1 체질 맞춤 한방 진료. 건강한 일상을 회복하도록 정성을 다해 진료하는 지아한의원입니다." />
+
+
+        <!-- =====================
+            공통리소스
+            영문폰트 : Cormorant Garamond
+            한글 포인트 서체 : Noto Serif
+        ====================== -->
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300..700;1,300..700&family=Noto+Serif:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+
+        <link rel="stylesheet" href="/zia-preview/static/fonts/Pretendard/Pretendard.css">
+        <link rel="stylesheet" href="/zia-preview/static/css/style.css" />
+        <script src="/zia-preview/static/js/jquery-3.5.0.js" type="text/javascript"></script>
+
+        <!-- 모달 공통 스크립트 -->
+        <script src="/zia-preview/static/js/modal_jq.js" type="text/javascript"></script>
+        <!-- //모달 공통 스크립트 -->
+
+        <!-- 공통 스크립트 -->
+        <script src="/zia-preview/static/js/common.js" type="text/javascript"></script>
+        <!-- //공통 스크립트 -->
+
+        <!-- =====================
+            개별 : 글 상세 페이지 리소스 (P3-d)
+            본문 슬라이드 없음 — swiper 미로드.
+            내용은 cms-inject.js 가 v_public_post_detail 을 ?id= 로 조회해 채운다.
+            body_html 은 렌더 전 zia-sanitize.js 화이트리스트로 재-sanitize (이중 방어).
+        ====================== -->
+        <link rel="stylesheet" href="/zia-preview/static/css/page/sub.css" />
+        <style>
+            .post-page .section-post { padding: 140px 0 80px; }
+            .post-page .inner { max-width: 860px; margin: 0 auto; padding: 0 20px; }
+            .post-state { text-align: center; padding: 80px 0; color: #666; }
+            .post-state .post-state-title { font-size: 24px; font-weight: 700; color: #222; margin-bottom: 10px; }
+            .post-state .post-state-desc { font-size: 15px; margin-bottom: 28px; }
+            .post-head { border-bottom: 1px solid #e5e1da; padding-bottom: 24px; margin-bottom: 32px; }
+            .post-badge { display: inline-block; background: #22344c; color: #fff; font-size: 13px; font-weight: 700; border-radius: 999px; padding: 5px 14px; margin-bottom: 14px; }
+            .post-title { font-size: 30px; line-height: 1.35; font-weight: 800; color: #1c1c1c; word-break: keep-all; margin: 0 0 12px; }
+            .post-meta { font-size: 14px; color: #8a877f; display: flex; gap: 12px; flex-wrap: wrap; }
+            .post-body { font-size: 16px; line-height: 1.8; color: #333; word-break: keep-all; }
+            .post-body p { margin: 0 0 14px; }
+            .post-body h2 { font-size: 24px; font-weight: 800; color: #1c1c1c; margin: 34px 0 12px; }
+            .post-body h3 { font-size: 20px; font-weight: 700; color: #1c1c1c; margin: 28px 0 10px; }
+            .post-body h4 { font-size: 17px; font-weight: 700; color: #1c1c1c; margin: 22px 0 8px; }
+            .post-body img { max-width: 100%; height: auto; border-radius: 10px; display: block; margin: 18px auto; }
+            .post-body ul, .post-body ol { margin: 0 0 14px 22px; }
+            .post-body li { margin-bottom: 6px; }
+            .post-body blockquote { border-left: 4px solid #22344c; background: #f6f4f0; margin: 0 0 14px; padding: 14px 18px; border-radius: 0 10px 10px 0; }
+            .post-body a { color: #1a5c8a; text-decoration: underline; }
+            .post-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 40px; justify-content: center; }
+            .post-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 26px; border: 1px solid #22344c; border-radius: 999px; color: #22344c; font-size: 15px; font-weight: 700; transition: background 0.15s, color 0.15s; }
+            .post-btn:hover { background: #22344c; color: #fff; }
+            @media (max-width: 767px) {
+                .post-page .section-post { padding: 110px 0 60px; }
+                .post-title { font-size: 24px; }
+                .post-body { font-size: 15px; }
+                .post-body h2 { font-size: 21px; }
+                .post-body h3 { font-size: 18px; }
+            }
+        </style>
+        <script>
+            $(document).ready(function(){
+                //Modal.open('main_popup');
+                //팝업이 있을 경우
+            });
+        </script>
+    </head>
+    <body>
+
+        <!-- =====================
+            공통 : header
+        ====================== -->
+        <header class="header">
+            <div class="header-inner">
+                <h1>
+                    <a href="/zia-preview/" class="logo" aria-label="지아한의원 메인으로 이동">
+                        <i class="icon-svg">
+                            <svg class="icon-logo">
+                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-logo"></use>
+                            </svg>
+                        </i>
+                    </a>
+                </h1>
+                <div class="gnb-row">
+                    <!-- =====================
+                        공통 : menu, 반응형을 위한 모바일 메뉴
+                    ====================== -->
+                    <nav class="gnb">
+                        <ul class="gnb_list">
+                            <li>
+                                <a href="/zia-preview/about.html">
+                                    <span>의원소개</span>
+                                </a>
+                            </li>
+
+                            <li>
+                                <a href="/zia-preview/autonomic.html">
+                                    <span>진료소개</span>
+                                    <i class="icon-svg">
+                                        <svg class="icon-arrow-def">
+                                            <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-arrow-def"></use>
+                                        </svg>
+                                    </i>
+                                </a>
+                                <div class="depth_box">
+                                    <ul class="depth2">
+                                        <li>
+                                            <a href="/zia-preview/autonomic.html">자율신경계</a>
+                                        </li>
+                                        <li>
+                                            <a href="#">근골격계질환</a>
+                                        </li>
+                                        <li>
+                                            <a href="#">소화기계질환</a>
+                                        </li>
+                                        <li>
+                                            <a href="#">여성/노인질환</a>
+                                        </li>
+                                        <li>
+                                            <a href="#">소아</a>
+                                        </li>
+                                        <li>
+                                            <a href="#">교통사고</a>
+                                        </li>
+                                        <li>
+                                            <a href="#">이비인후과</a>
+                                        </li>
+                                        <li>
+                                            <a href="#">피부과</a>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </li>
+
+                            <li>
+                                <a href="/zia-preview/reviews.html">
+                                    <span>치료후기</span>
+                                </a>
+                            </li>
+
+                            <li>
+                                <a href="/zia-preview/faq.html">
+                                    <span>자주 묻는 질문</span>
+                                </a>
+                            </li>
+
+                            <li>
+                                <a href="/zia-preview/location.html">
+                                    <span>오시는 길</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </nav>
+                    <!-- //menu -->
+                </div>
+                <div class="pc-gnb-row">
+                    <!-- =====================
+                        공통 : menu, 반응형을 위한 데스크탑 메뉴
+                    ====================== -->
+                    <nav class="gnb">
+                        <ul class="gnb_list">
+                            <li>
+                                <a href="/zia-preview/about.html">
+                                    <span>의원소개</span>
+                                </a>
+                            </li>
+
+                            <li>
+                                <a href="/zia-preview/autonomic.html">
+                                    <span>진료소개</span>
+                                    <i class="icon-svg">
+                                        <svg class="icon-arrow-def">
+                                            <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-arrow-def"></use>
+                                        </svg>
+                                    </i>
+                                </a>
+                                <div class="depth_box">
+                                    <div class="mega-menu-inner">
+                                        <div class="mega-visual">
+                                            <h2>진료 소개</h2>
+                                        </div>
+
+                                        <div class="mega-list">
+                                            <ul class="depth2">
+                                                <li>
+                                                    <a href="/zia-preview/autonomic.html">
+                                                        <span>자율신경계</span>
+                                                        <i class="icon-svg">
+                                                            <svg class="icon-top">
+                                                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-top"></use>
+                                                            </svg>
+                                                        </i>
+                                                    </a>
+                                                </li>
+                                                <li>
+                                                    <a href="/zia-preview/musculoskeletal.html">
+                                                        <span>근골격계질환</span>
+                                                        <i class="icon-svg">
+                                                            <svg class="icon-top">
+                                                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-top"></use>
+                                                            </svg>
+                                                        </i>
+                                                    </a>
+                                                </li>
+                                                <li>
+                                                    <a href="/zia-preview/digestive.html">
+                                                        <span>소화기계질환</span>
+                                                        <i class="icon-svg">
+                                                            <svg class="icon-top">
+                                                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-top"></use>
+                                                            </svg>
+                                                        </i>
+                                                    </a>
+                                                </li>
+                                                <li>
+                                                    <a href="/zia-preview/diet.html">
+                                                        <span>다이어트</span>
+                                                        <i class="icon-svg">
+                                                            <svg class="icon-top">
+                                                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-top"></use>
+                                                            </svg>
+                                                        </i>
+                                                    </a>
+                                                </li>
+                                                <li>
+                                                    <a href="/zia-preview/women_senior.html">
+                                                        <span>여성질환/노인질환</span>
+                                                        <i class="icon-svg">
+                                                            <svg class="icon-top">
+                                                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-top"></use>
+                                                            </svg>
+                                                        </i>
+                                                    </a>
+                                                </li>
+                                                <li>
+                                                    <a href="/zia-preview/pediatrics.html">
+                                                        <span>소아</span>
+                                                        <i class="icon-svg">
+                                                            <svg class="icon-top">
+                                                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-top"></use>
+                                                            </svg>
+                                                        </i>
+                                                    </a>
+                                                </li>
+                                                <li>
+                                                    <a href="/zia-preview/traffic_accident.html">
+                                                        <span>교통사고</span>
+                                                        <i class="icon-svg">
+                                                            <svg class="icon-top">
+                                                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-top"></use>
+                                                            </svg>
+                                                        </i>
+                                                    </a>
+                                                </li>
+                                                <li>
+                                                    <a href="/zia-preview/ent.html">
+                                                        <span>이비인후과</span>
+                                                        <i class="icon-svg">
+                                                            <svg class="icon-top">
+                                                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-top"></use>
+                                                            </svg>
+                                                        </i>
+                                                    </a>
+                                                </li>
+                                                <li>
+                                                    <a href="/zia-preview/dermatology.html">
+                                                        <span>피부과</span>
+                                                        <i class="icon-svg">
+                                                            <svg class="icon-top">
+                                                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-top"></use>
+                                                            </svg>
+                                                        </i>
+                                                    </a>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </li>
+
+                            <li>
+                                <a href="/zia-preview/reviews.html">
+                                    <span>치료후기</span>
+                                </a>
+                            </li>
+
+                            <li>
+                                <a href="/zia-preview/faq.html">
+                                    <span>자주 묻는 질문</span>
+                                </a>
+                            </li>
+
+                            <li>
+                                <a href="/zia-preview/location.html">
+                                    <span>오시는 길</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </nav>
+                    <!-- //menu -->
+                </div>
+                <a href="#" class="btn shape-pill type-line-secondary appointment">진료 예약하기</a>
+                <a id="toggle-menu" class="btn-gnb-open" aria-label="전체메뉴">
+                    <div>
+                        <span class="top"></span>
+                        <span class="middle"></span>
+                        <span class="bottom"></span>
+                    </div>
+                </a>
+            </div>
+        </header>
+        <!-- //header  -->
+
+
+
+        <!-- =====================
+            개별 : 글 상세 (P3-d — cms-inject.js 가 채움)
+        ====================== -->
+        <div class="container post-page">
+            <section class="section section-post">
+                <div class="inner">
+                    <!-- 불러오는 중 (기본 표시) -->
+                    <div id="post-loading" class="post-state">
+                        <p>글을 불러오고 있어요&hellip;</p>
+                    </div>
+
+                    <!-- 데이터 없음/실패 -->
+                    <div id="post-notfound" class="post-state" style="display:none;">
+                        <p class="post-state-title">글을 찾을 수 없습니다</p>
+                        <p class="post-state-desc">주소가 잘못되었거나, 글이 내려갔을 수 있어요.</p>
+                        <div class="post-actions">
+                            <a href="/zia-preview/" class="post-btn">홈으로 가기</a>
+                        </div>
+                    </div>
+
+                    <!-- 글 본문 -->
+                    <article id="post-article" class="post-detail" style="display:none;">
+                        <header class="post-head">
+                            <span class="post-badge" id="post-badge" style="display:none;"></span>
+                            <h2 class="post-title" id="post-title"></h2>
+                            <p class="post-meta"><span id="post-zone"></span><span id="post-date"></span></p>
+                        </header>
+                        <div class="post-body" id="post-body"></div>
+                        <div class="post-actions">
+                            <a id="post-external" class="post-btn" style="display:none;" target="_blank" rel="noopener">블로그 원문 보기</a>
+                            <a id="post-back" class="post-btn" href="/zia-preview/">목록으로</a>
+                        </div>
+                    </article>
+                </div>
+            </section>
+        </div>
+        <!-- //글 상세 -->
+
+
+
+        <!-- =====================
+            공통 : footer
+        ====================== -->
+
+        <!-- 공통 배너 영역 -->
+        <section class="section section-banner bottom-banner">
+            <div class="inner flex-box">
+                <div class="text">
+                    <h2>반복되는 불편함, <br><strong>몸의 작은 신호도</strong> <br class="mo">지나치지 마세요</h2>
+                    <p>지아한의원이 가까이에서 함께하겠습니다.</p>
+                </div>
+                <div class="btn-area">
+                    <a href="#" class="btn shape-square type-gray-wh">
+                        <span>진료예약</span>
+                        <i class="icon-svg">
+                            <svg class="icon-top">
+                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-top"></use>
+                            </svg>
+                        </i>
+                    </a>
+                </div>
+            </div>
+        </section>
+
+        <!-- 퀵메뉴 -->
+         <div id="quick">
+            <ul>
+                <li>
+                    <a href="#">
+                        <i class="icon-svg">
+                            <svg class="icon-tel-cs">
+                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-tel-cs"></use>
+                            </svg>
+                        </i>
+                        <span>전화문의</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="#">
+                        <i class="icon-svg">
+                            <svg class="icon-kakao-cs">
+                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-kakao-cs"></use>
+                            </svg>
+                        </i>
+                        <span>카카오상담</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="#">
+                        <i class="icon-svg">
+                            <svg class="icon-naver-booking">
+                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-naver-booking"></use>
+                            </svg>
+                        </i>
+                        <span>네이버예약</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="#">
+                        <i class="icon-svg">
+                            <svg class="icon-top">
+                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-top"></use>
+                            </svg>
+                        </i>
+                    </a>
+                </li>
+            </ul>
+         </div>
+        <!-- //퀵메뉴 -->
+
+        <footer>
+            <div class="footer-inner">
+                <div class="footer-inner-top">
+                    <!-- footer 로고 -->
+                    <a href="/zia-preview/">
+                        <i class="icon-svg">
+                            <svg class="icon-logo">
+                                <use xlink:href="/zia-preview/static/images/common/icons.svg#icon-logo"></use>
+                            </svg>
+                        </i>
+                    </a>
+                    <!-- //footer 로고 -->
+                    <div class="cs-info">
+                        <p class="tel">02-2693-1055</p>
+                        <p class="biz-time">주말·공휴일에도 진료합니다.</p>
+                    </div>
+                </div>
+                <div class="footer-inner-middle">
+                    <div class="clinic-hours">
+                        <h3>진료시간</h3>
+                        <ul>
+                            <li>
+                                <strong>평일진료</strong>
+                                <p>오전 9시 ~ 오후 8시</p>
+                            </li>
+                            <li>
+                                <strong>주말진료</strong>
+                                <p>오전 9시 ~ 오후 3시</p>
+                            </li>
+                            <li>
+                                <strong>점심시간</strong>
+                                <p>오후 1시 ~ 오후 2시</p>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="footer-inner-bottom">
+                    <div class="company-info">
+                        <ul>
+                            <li>
+                                <strong>대표자</strong>
+                                <span>정윤희</span>
+                            </li>
+                            <li>
+                                <strong>사업자등록번호</strong>
+                                <span>266-93-02110</span>
+                            </li>
+                            <li>
+                                <strong>주소</strong>
+                                <span>서울특별시 강서구 강서로16길 24, 1층</span>
+                            </li>
+                        </ul>
+                    </div>
+                    <a href="#">개인정보처리방침</a>
+                </div>
+            </div>
+        </footer>
+
+        <!-- 페이지 콘텐츠 보이기 모션 -->
+        <script src="/zia-preview/static/js/page_obj_show_motion.js"></script>
+        <!-- //페이지 콘텐츠 보이기 모션 -->
+
+        <!-- 유입경로 분기(crm/ad/blog) + CTA 중앙 설정 + 본문 sanitize -->
+        <script src="/zia-preview/static/js/site-config.js"></script>
+        <script src="/zia-preview/static/js/channel.js"></script>
+        <script src="/zia-preview/static/js/zia-sanitize.js"></script>
+        <script src="/zia-preview/static/js/cms-inject.js"></script>
+        <!-- //유입경로 분기 -->
+        <!-- //footer -->
+    </body>
+</html>
