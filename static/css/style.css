@@ -8087,7 +8087,7 @@ header .gnb-row:before {
 }
 @media screen and (min-width: 1200px) {
   header .gnb-row:before {
-    background-image: url("/zia-preview/static/images/common/bg-gnb-row.jpg");
+    background-image: url("/zia-preview/static/images/common/bg_gnb_towdepth.jpg");
     background-repeat: no-repeat;
     background-position: center center;
     background-size: cover;
@@ -8513,7 +8513,10 @@ header .pc-gnb-row .gnb .gnb_list > li .depth_box {
     align-items: flex-start;
     background: url("/zia-preview/static/images/common/bg_gnb_towdepth.jpg") no-repeat 100% 100%;
     background-size: cover;
-    padding: 48px 0px 0px 120px;
+    /* V-4: 우측 여백 0 이면 마지막 항목의 원형 화살표가 창 오른쪽 끝에 닿아 잘린다
+       (1280 노트북 폭에서 여유 2px 실측). 열 간격(56px)과 같은 우측 거터를 두어
+       줄바꿈 임계를 앞당긴다 — 항목 수가 늘어도 화살표가 잘리지 않는다. */
+    padding: 48px 56px 0px 120px;
   }
 }
 @media screen and (min-width: 1200px) {

@@ -13,7 +13,7 @@
   --card: #ffffff;
   --line: #dde3e0;
   --text: #222b28;
-  --muted: #6b7772;
+  --muted: #57635e;         /* G-4: 배경(#f4f6f5) 위 4.30:1 → 5.7:1 (WCAG AA) */
   --red: #c0392b;
   --red-pale: #fdf0ee;
   --amber: #a3690b;
@@ -60,7 +60,7 @@ button, .btn {
 .btn-danger-solid { background: var(--red); color: #fff; font-weight: 700; }
 .btn-sm { min-height: 44px; font-size: 1rem; padding: 0 16px; }
 .btn-block { width: 100%; }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
+button:disabled { opacity: 0.6; cursor: not-allowed; }   /* G-4: 너무 옅어 안 보이던 것 보정 */
 
 /* ── 헤더 ─────────────────────────────────────────────────────── */
 .app-header {
@@ -81,14 +81,20 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 1.25rem; font-weight: 800; padding: 0; min-height: 44px;
 }
 .app-header .head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.app-header .head-actions button {
-  background: rgba(255, 255, 255, 0.12); color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  min-height: 44px; font-size: 0.95rem; padding: 0 14px;
+/* G-4: 헤더 위 버튼은 어두운 남색 배경에 놓인다 → 회색 글자(.btn-ghost)를 쓰면
+   꺼진 버튼처럼 보인다(2.96:1). 헤더 안 버튼은 전부 흰 글자로 통일한다. */
+.app-header .head-actions button,
+.app-header .head-right button {
+  background: rgba(255, 255, 255, 0.16); color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  min-height: 44px; font-size: 0.95rem; padding: 0 14px; font-weight: 700;
   white-space: nowrap; /* "비밀번호 변경"·"로그아웃" 두 줄 꺾임 방지 (QA 2026-07-22) */
 }
-.app-header .head-actions button:hover { background: rgba(255, 255, 255, 0.22); }
-.head-email { font-size: 0.85rem; opacity: 0.75; width: 100%; text-align: right; }
+.app-header .head-actions button:hover,
+.app-header .head-right button:hover { background: rgba(255, 255, 255, 0.3); }
+.app-header .head-right .brand,
+.app-header .brand { background: none; border: none; }
+.head-email { font-size: 0.85rem; opacity: 0.92; width: 100%; text-align: right; }
 
 /* ── 레이아웃 ─────────────────────────────────────────────────── */
 main#view-root { max-width: 880px; margin: 0 auto; padding: 24px 16px 80px; }
@@ -143,6 +149,12 @@ textarea { resize: vertical; min-height: 140px; line-height: 1.6; }
 .notice-info { background: var(--green-pale); border: 1px solid #c4e0d7; color: var(--green-dark); border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; }
 
 /* ── 대시보드 카드 ────────────────────────────────────────────── */
+/* 카드 9장을 한 판에 늘어놓으면 "고를 것이 아홉 개"로 읽힌다 → 세 묶음으로 나눠
+   한 번에 눈에 들어오는 덩어리를 3~4장으로 줄인다. 묶음마다 먼저 눌러 볼 카드 1장을
+   한 줄 전체로 키운다(.dash-card-lead). */
+.dash-section { margin-bottom: 28px; }
+.dash-section-title { font-size: 1.1rem; margin-bottom: 2px; }
+.dash-section-desc { color: var(--muted); font-size: 0.95rem; margin-bottom: 12px; }
 .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
 .dash-card {
   display: block; background: var(--card); border: 1px solid var(--line);
@@ -158,6 +170,14 @@ textarea { resize: vertical; min-height: 140px; line-height: 1.6; }
 }
 .dash-card h2 { font-size: 1.2rem; margin-bottom: 6px; }
 .dash-card p { color: var(--muted); font-size: 0.95rem; }
+/* 묶음마다 먼저 눌러 볼 카드 — 한 줄 전체 + 아이콘을 옆에 둬 높이를 낮춘다 */
+.dash-card-lead {
+  grid-column: 1 / -1; border-color: var(--green); border-width: 2px;
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 20px 22px;
+}
+.dash-card-lead .dash-icon { background: var(--green); color: #fff; margin-bottom: 0; flex: none; }
+.dash-card-lead h2 { margin-bottom: 2px; }
+.dash-card-lead .lead-text { min-width: 240px; }
 
 /* ── 스위치 (토글) ────────────────────────────────────────────── */
 .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; min-height: 44px; }
@@ -204,7 +224,7 @@ textarea { resize: vertical; min-height: 140px; line-height: 1.6; }
 .pill-live { background: var(--green-pale); color: var(--green-dark); }
 .pill-draft { background: #eef0ef; color: var(--muted); }
 .pill-fail { background: var(--red-pale); color: var(--red); }
-.pill-star { background: #fdf3d8; color: #8a6d1a; }
+.pill-star { background: #fdf3d8; color: #6f5610; }   /* G-4: 4.43:1 → 6.0:1 (AA) */
 
 .empty-note { text-align: center; color: var(--muted); padding: 40px 10px; }
 
@@ -358,11 +378,12 @@ button.pick-item:hover { border-color: var(--green); background: var(--green-pal
 .faq-group-title { font-size: 1.1rem; margin: 18px 0 10px; padding-left: 4px; }
 .faq-move { display: flex; flex-direction: column; gap: 4px; }
 .btn-move {
-  min-height: 34px; min-width: 40px; padding: 0 8px; font-size: 0.85rem;
+  /* 40~60대 원장이 자주 누르는 버튼 — 손가락으로 눌러도 빗나가지 않는 크기(44px) */
+  min-height: 44px; min-width: 44px; padding: 0 8px; font-size: 0.95rem;
   border: 1px solid var(--line); background: #fff; border-radius: 8px; color: var(--muted);
 }
 .btn-move:hover:not(:disabled) { border-color: var(--green); color: var(--green-dark); }
-.btn-move:disabled { opacity: 0.3; }
+.btn-move:disabled { opacity: 0.55; }   /* G-4: 1.55:1 → 눈에 보이는 수준으로 */
 
 /* ── P3-d: ZONE 대표 이미지 ───────────────────────────────────── */
 .zone-hero { margin-top: 10px; }
@@ -447,11 +468,36 @@ body.live-mode main#view-root { max-width: none; margin: 0; padding: 0; }
   display: flex; justify-content: center; align-items: stretch;
 }
 body.live-mode .live-frame-wrap {
-  flex: 1 1 auto; width: 100%; height: 100%; min-height: 0;
+  flex: 1 1 auto; width: 100%; height: 100%; min-height: 0; min-width: 0;
   border-radius: 10px; overflow: hidden;
 }
-body.live-mode .live-frame-wrap iframe { width: 100%; height: 100%; }
-body.live-mode .live-frame-wrap.mobile { flex: 0 0 390px; max-width: 390px; }
+/* 폭·높이·축소 비율은 app.js syncLiveScale 이 직접 넣는다 (창 크기마다 값이 다르다).
+ * 여기서는 축소 기준점만 고정 — 왼쪽 위를 기준으로 줄여야 위치가 어긋나지 않는다. */
+body.live-mode .live-frame-wrap iframe { width: 100%; height: 100%; transform-origin: top left; }
+/* 휴대폰 폭은 테두리를 뺀 안쪽이 정확히 390 이어야 한다 (안 그러면 쓸데없이 축소된다) */
+body.live-mode .live-frame-wrap.mobile {
+  box-sizing: content-box; flex: 0 1 390px; width: 390px; max-width: 390px;
+}
+
+/* 미리보기를 못 불러왔을 때 자리 (영문 오류 화면 대신 보여 주는 안내) */
+.live-fail {
+  margin: auto; max-width: 460px; padding: 24px 20px; text-align: center;
+  background: #fff; border: 1.5px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.live-fail h2 { font-size: 1.15rem; margin: 0 0 10px; }
+.live-fail p { color: var(--muted); font-size: 0.97rem; line-height: 1.6; margin: 0 0 8px; }
+.live-fail .live-fail-btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 16px; }
+.live-fail .live-fail-btns button { min-height: 44px; padding: 0 16px; }
+
+/* 아직 홈페이지에 안 올라간 것 알림 (0건이면 아예 감춘다) */
+.live-draft {
+  min-height: 44px; padding: 0 14px; border-radius: 999px;
+  border: 1.5px solid var(--amber); background: var(--amber-pale);
+  color: var(--amber); font-weight: 800; font-size: 0.95rem; white-space: nowrap;
+}
+.live-draft:hover { background: var(--amber); color: #fff; }
+.live-draft strong { font-weight: 900; }
 
 /* ── 모음 패널 ── */
 .live-panel {
@@ -479,8 +525,9 @@ body.live-mode .live-frame-wrap.mobile { flex: 0 0 390px; max-width: 390px; }
 
 .lib-tabs { flex: 0 0 auto; display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .lib-tab {
-  flex: 1; min-height: 44px; padding: 0 10px; border-radius: 999px;
+  flex: 1; min-width: 0; min-height: 44px; padding: 0 10px; border-radius: 999px;
   border: 1.5px solid var(--line); background: #fff; color: var(--muted); font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;   /* V-6: 탭 높이 균일 */
 }
 .lib-tab.active { border-color: var(--green); background: var(--green-pale); color: var(--green-dark); font-weight: 800; }
 
@@ -489,11 +536,15 @@ body.live-mode .live-frame-wrap.mobile { flex: 0 0 390px; max-width: 390px; }
 .lib-subsec { font-size: 0.85rem; font-weight: 700; color: var(--muted); margin: 10px 0 6px; }
 .lib-empty { color: var(--muted); font-size: 0.92rem; padding: 12px 2px; word-break: keep-all; }
 
-.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; }
+.lib-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px;
+  grid-auto-rows: 1fr;   /* V-6: 같은 줄 카드 높이를 고르게 */
+}
 .lib-card {
   display: flex; flex-direction: column; align-items: stretch; gap: 6px;
-  min-height: 44px; padding: 6px; text-align: left; font-size: 0.9rem;
+  min-height: 44px; height: 100%; padding: 6px; text-align: left; font-size: 0.9rem;
   border: 1.5px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer;
+  min-width: 0; overflow: hidden;   /* V-5: 카드 밖으로 글자가 넘치지 않게 */
 }
 .lib-card:hover { border-color: var(--green); background: var(--green-pale); }
 .lib-card.chosen { border-color: var(--amber); background: var(--amber-pale); box-shadow: 0 0 0 2px var(--amber); }
@@ -502,8 +553,17 @@ body.live-mode .live-frame-wrap.mobile { flex: 0 0 390px; max-width: 390px; }
   display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 0.8rem;
 }
-.lib-label { font-weight: 700; font-size: 0.88rem; line-height: 1.35; word-break: keep-all; }
-.lib-meta { display: flex; gap: 4px; flex-wrap: wrap; font-size: 0.75rem; color: var(--muted); }
+/* V-5·V-6 — 어떤 라벨(긴 파일 이름 포함)이 와도 카드 안에 가두고 두 줄로 말줄임.
+   F-8 로 원본 파일 이름이 라벨에 들어오면서 더 길어지므로 반드시 함께 지켜야 한다. */
+.lib-label {
+  font-weight: 700; font-size: 0.88rem; line-height: 1.35;
+  word-break: break-word; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; text-overflow: ellipsis;
+  min-width: 0; max-width: 100%;
+}
+.lib-meta { display: flex; gap: 4px; flex-wrap: wrap; font-size: 0.75rem; color: var(--muted); min-width: 0; overflow: hidden; }
+.lib-meta > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .lib-meta .pill { font-size: 0.72rem; padding: 2px 7px; }
 
 .lib-drop {
@@ -514,23 +574,35 @@ body.live-mode .live-frame-wrap.mobile { flex: 0 0 390px; max-width: 390px; }
 .lib-drop:hover, .lib-drop.drag-on { border-color: var(--green); background: var(--green-pale); }
 .lib-drop-hint { color: var(--muted); font-size: 0.9rem; font-weight: 600; word-break: keep-all; }
 
-/* ── 좁은 화면: 패널은 캔버스 위로 덮는 서랍이 된다 (기본 접힘) ── */
+/* ── 좁은 화면 (G-6) ──
+ * 옛 방식은 패널이 미리보기 **위를 덮는** 서랍이라, 1024px 안팎에서 미리보기 오른쪽과
+ * 미리보기 안의 "수정 모드 끄기" 버튼까지 가렸다. 이제는
+ *   · 701~1024px : 덮지 않고 **나란히** 놓고 패널만 좁힌다
+ *   · 700px 이하 : 아래에서 올라오는 서랍 + 툴바 고정 → 툴바·미리보기가 늘 보인다
+ */
 @media (max-width: 1024px) {
-  .live-panel {
-    position: absolute; top: 0; right: 0; bottom: 0; z-index: 20;
-    flex-basis: auto; width: min(340px, 88vw);
-    box-shadow: -6px 0 20px rgba(20, 40, 30, 0.18);
-  }
-  .live-panel.collapsed { width: 0; box-shadow: none; }
+  .live-panel { flex: 0 0 288px; width: 288px; }
 }
 @media (max-width: 700px) {
   body.live-mode { overflow: auto; }
   .live-shell { height: auto; }
-  .live-canvas { height: 70vh; padding: 6px; }
-  .live-toolbar { padding: 6px 8px; }
+  .live-canvas { height: 68vh; padding: 6px; }
+  .live-toolbar {
+    padding: 6px 8px;
+    position: sticky; top: var(--head-h); z-index: 30;   /* 편집 종료·화면 전환은 늘 손에 닿게 */
+  }
   .live-toolbar select { max-width: 100%; flex: 1 1 140px; }
   .live-toolbar .live-spacer { display: none; }
-  .live-panel { position: fixed; top: var(--head-h); width: min(340px, 92vw); }
+  .live-panel {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 40;
+    width: auto; max-width: none; flex-basis: auto;
+    height: min(48vh, 380px);   /* 미리보기가 더 보이게 (G-6) */
+    border-left: 0; border-top: 1px solid var(--line);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -8px 24px rgba(20, 40, 30, 0.22);
+  }
+  .live-panel.collapsed { height: 0; width: auto; box-shadow: none; border-top: 0; }
+  .live-panel-head { position: sticky; top: 0; background: #fff; z-index: 1; }
 }
 
 /* ── 셸: 로그인 화면 + 앱 레이아웃 (index.html 정적 골격) ──────────── */
@@ -555,4 +627,139 @@ body.live-mode .live-frame-wrap.mobile { flex: 0 0 390px; max-width: 390px; }
 @media (max-width: 640px) {
   .login-card { padding: 28px 18px; }
   .view-root { padding: 16px 12px 70px; }
+}
+
+/* ── F-6: 사진 올리는 중 진행 표시 ── 멈춘 줄 알고 창을 닫지 않도록 계속 움직인다 */
+.up-bar {
+  display: block; width: 100%; max-width: 220px; height: 8px;
+  background: #dfe6e2; border-radius: 999px; overflow: hidden; margin-top: 8px;
+}
+.up-bar-fill {
+  display: block; height: 100%; width: 0%;
+  background: var(--green); border-radius: 999px;
+  transition: width 0.2s linear;
+}
+.img-drop.uploading, .lib-drop.uploading {
+  border-color: var(--green); background: var(--green-pale); cursor: progress;
+}
+.img-drop.uploading .img-drop-hint, .lib-drop.uploading .lib-drop-hint { color: var(--green-dark); }
+
+/* ════════ 콘텐츠 모아보기 (#/content) ════════
+ * 치수 근거: 행 높이 56px+ · 조작 버튼 44px(WCAG 2.5.5 AAA 권장) · 본문 16px.
+ * 40~60대 비전문가가 주 이용자라 풀다운을 줄이고 눌러서 고르는 형태로 둔다. */
+
+.hub-tabs { margin: 4px 0 12px; }
+.hub-tab { min-height: 44px; font-size: 16px; }
+.hub-count {
+  display: inline-block; min-width: 20px; padding: 0 6px; margin-left: 4px;
+  background: rgba(0, 0, 0, 0.07); border-radius: 999px;
+  font-size: 13px; font-weight: 600; color: var(--muted);
+}
+/* 활성 표시는 코드베이스 관례(.active)를 따른다 — .lib-tab.active 가 이미 초록 계열이라
+   숫자 배지는 그 위에서 읽히도록 진한 색으로 둔다(흰 글씨는 흰 배경에서 사라진다). */
+.hub-tab.active .hub-count { background: #fff; color: var(--green-dark); }
+.hub-seg.active .hub-count { background: rgba(255, 255, 255, 0.25); color: #fff; }
+
+.hub-bar { gap: 8px; flex-wrap: wrap; }
+.hub-search {
+  flex: 1 1 260px; min-width: 200px; min-height: 44px;
+  font-size: 16px; /* iOS에서 16px 미만이면 입력 시 화면이 확대된다 */
+}
+.hub-bar select { min-height: 44px; font-size: 16px; max-width: 220px; }
+
+.hub-seg-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+.hub-seg {
+  min-height: 44px; padding: 0 14px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--card); color: var(--text);
+  font-size: 15px; cursor: pointer;
+}
+.hub-seg:hover { border-color: var(--green); }
+.hub-seg.active { background: var(--green); border-color: var(--green); color: #fff; font-weight: 700; }
+
+.hub-draft-note { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.hub-draft-note > span { flex: 1 1 260px; }
+
+.hub-row { min-height: 64px; align-items: center; gap: 10px; }
+.hub-row.is-sel { background: var(--green-pale); border-color: var(--green); }
+.hub-check-slot {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; cursor: pointer; /* 체크박스 자체는 작아도 누를 면적은 44px */
+}
+.hub-check { width: 20px; height: 20px; cursor: pointer; }
+
+.hub-thumb {
+  flex: 0 0 auto; width: 56px; height: 56px; border-radius: 8px;
+  overflow: hidden; background: var(--bg); border: 1px solid var(--line);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.hub-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hub-thumb-empty { font-size: 13px; color: var(--muted); }
+.hub-kind { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+.hub-when { color: var(--muted); }
+
+.hub-bulk {
+  position: sticky; bottom: 0; z-index: 5;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 12px 0; padding: 12px 14px;
+  background: var(--navy); color: #fff;
+  border-radius: var(--radius); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+.hub-bulk-n { margin-right: auto; font-size: 15px; }
+
+.hub-empty { text-align: center; padding: 36px 16px; }
+.hub-empty-title { font-size: 18px; font-weight: 700; color: var(--text); margin: 0 0 6px; }
+.hub-empty .empty-note { margin: 0 0 16px; }
+
+@media (max-width: 640px) {
+  .hub-row { flex-wrap: wrap; }
+  .hub-row .item-actions { width: 100%; justify-content: flex-end; }
+}
+
+/* ════════ 색·글씨 (#/design) ════════ */
+.design-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.design-row:last-of-type { border-bottom: 0; }
+.design-label { flex: 1 1 200px; min-width: 160px; }
+.design-label label { font-weight: 700; }
+.design-label .help { margin: 2px 0 0; }
+.design-row input[type="color"] { width: 56px; height: 44px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer; }
+.design-row input.design-hex { flex: 0 0 118px; width: 118px; min-height: 44px; font-size: 16px; font-family: ui-monospace, Menlo, monospace; text-transform: uppercase; }
+.design-verdict { min-width: 76px; font-size: 14px; font-weight: 700; }
+.design-verdict.is-ok { color: var(--green-dark); }
+.design-verdict.is-bad { color: var(--red); }
+.design-row.is-bad .design-hex { border-color: var(--red); background: var(--red-pale); }
+.design-note { margin-top: 12px; }
+.design-scale { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+
+/* 사진 격자 — 60장을 훑을 수 있게. 행 목록은 세로로 끝없이 늘어져 못 쓴다. */
+.hub-photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; }
+.hub-photo { display: block; padding: 10px; }
+.hub-photo-thumb {
+  display: block; width: 100%; aspect-ratio: 4 / 3; margin-bottom: 8px;
+  border-radius: 8px; overflow: hidden; background: var(--bg); border: 1px solid var(--line);
+}
+.hub-photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hub-photo-name {
+  font-weight: 600; font-size: 14px; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.hub-photo-use { margin-top: 4px; font-size: 13px; color: var(--muted); }
+.hub-photo-use.is-used { color: var(--green-dark); font-weight: 600; }
+.hub-photo .item-actions { margin-top: 10px; justify-content: flex-start; }
+
+/* ════════ 휴진·공지 알림 (#/notice) ════════ */
+.notice-dates { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.notice-dates input[type="date"] { min-height: 44px; font-size: 16px; max-width: 190px; }
+.notice-preview { padding: 8px 0; }
+.notice-card {
+  max-width: 380px; margin: 0 auto; padding: 20px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(20, 40, 30, 0.16);
+}
+.notice-card-title { font-size: 18px; font-weight: 800; margin-bottom: 8px; }
+.notice-card-body { font-size: 15px; line-height: 1.6; color: var(--text); white-space: normal; }
+.notice-card-foot {
+  display: flex; justify-content: space-between; gap: 10px;
+  margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line);
+  font-size: 14px; color: var(--muted);
 }

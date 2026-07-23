@@ -189,6 +189,9 @@
     function fPost(selector, column, label, kind) {
         return fRow(selector, 'posts', column, 'data-post-id', label, kind, H_POSTS);
     }
+    // longText = "여기는 길이가 실제로 문제가 되는 자리" 표시. 편집기가 이 자리에만
+    // 글자 수 한도 안내를 붙인다 (전화번호 칸에 "최대 2,000자" 안내는 소음이라서).
+    function fLong(entry) { entry.longText = true; return entry; }
     function fZone(selector, column, label, kind) {
         return fRow(selector, 'zones', column, 'data-zone-id', label, kind, H_ZONES);
     }
@@ -235,7 +238,7 @@
         // 홈 §5 진료소개 탭 (I4 / I5)
         'zone.tab_label.home':      fZone('.section-05 .tab-container .tab-btn[data-zone-id]', 'tab_label', '홈 진료탭에 보이는 분야 이름'),
         'zone.name.home':           fZone('.section-05 .tab-panel[data-zone-id] .panel-visual .text h3', 'name', '진료 분야 이름'),
-        'zone.description.home':    fZone('.section-05 .tab-panel[data-zone-id] .panel-visual .text p', 'description', '진료 분야 소개 글'),
+        'zone.description.home':    fLong(fZone('.section-05 .tab-panel[data-zone-id] .panel-visual .text p', 'description', '진료 분야 소개 글')),
         'zone.english_label.home':  fZone('.section-05 .tab-panel[data-zone-id] .panel-visual .text span', 'english_label', '분야 영문 표기'),
         'zone.hero_image.home':     fZone('.section-05 .tab-panel[data-zone-id] .panel-visual .img-row img', 'hero_image_path', '분야 대표 사진', 'image'),
         // GNB (C1 모바일 / C2 PC — 메뉴를 연 상태에서만 보인다)
@@ -246,7 +249,7 @@
         'zone.faq_label.faqpage':   fZone('.faq-tab-area .tab-btn[data-zone-id]', 'faq_label', '질문 묶음 이름'),
         // zone.html 분야 글 아카이브 히어로 (Z1)
         'zone.name.archive':        fZone('#zone-title', 'name', '진료 분야 이름'),
-        'zone.description.archive': fZone('#zone-desc', 'description', '진료 분야 소개 글'),
+        'zone.description.archive': fLong(fZone('#zone-desc', 'description', '진료 분야 소개 글')),
         'zone.english_label.archive': fZone('#zone-eng', 'english_label', '분야 영문 표기'),
 
         /* ── 글 (posts) ────────────────────────────────────────────────── */
@@ -259,10 +262,10 @@
         // P1 글 상세 (post.html)
         'post.title.detail':    fPost('#post-title', 'title', '글 제목'),
         'post.badge.detail':    fPost('#post-badge', 'badge', '글 꼬리표'),
-        'post.body.detail':     fPost('#post-body', 'body_html', '글 본문', 'html'),
+        'post.body.detail':     fLong(fPost('#post-body', 'body_html', '글 본문', 'html')),
 
         /* ── 후기 (reviews) ────────────────────────────────────────────── */
-        'review.body.card':      fRow('.review-card[data-review-id] .txt', 'reviews', 'body', 'data-review-id', '후기 내용', 'text', H_REVIEWS),
+        'review.body.card':      fLong(fRow('.review-card[data-review-id] .txt', 'reviews', 'body', 'data-review-id', '후기 내용', 'text', H_REVIEWS)),
         'review.title.grid':     fRow('.review-item[data-review-id] .info-box .title', 'reviews', 'title', 'data-review-id', '후기 제목', 'text', H_REVIEWS),
         'review.thumbnail.grid': fRow('.review-item[data-review-id] .img-box img', 'reviews', 'thumbnail_path', 'data-review-id', '후기 사진', 'image', H_REVIEWS),
 
@@ -290,24 +293,65 @@
         } catch (e) { /* CustomEvent 미지원 구형 — flag 로 충분 */ }
     }
 
+    // ════════════════════════════════════════════════════════════════════
+    // C-3 — "조회 실패"와 "없는 대상"을 구분한 안내 (동적 페이지 공용)
+    // ------------------------------------------------------------------------
+    // 왜: 통신 장애·타임아웃은 "그 분야(글)가 내려갔다"가 아니다. 원인이 통신인데
+    //   "해당 분야가 내려갔을 수 있어요"라고 알리면 방문자에게 사실과 다른 정보를 준다.
+    //   실패는 다시 시도하면 풀릴 수 있으므로 **다시 시도할 수단**도 함께 준다.
+    // 구현: 정적 마크업을 새로 만들지 않고 기존 '찾을 수 없습니다' 블록의 문구를 실패용으로
+    //   바꿔 끼우고 '다시 시도' 버튼을 1개 덧붙인다 (post.html 마크업 무수정 원칙 준수.
+    //   버튼은 <a> 로 만들어 .post-btn/.zone-btn 앵커 스타일을 그대로 물려받는다).
+    // ⚠ 본 함수는 config 부재 조기 종료 경로에서도 쓰인다 → 아래에서 선언되는 변수
+    //   (path/BASE/KIND 등)에 절대 의존하지 않는다 (함수 선언 호이스팅만 이용).
+    // ════════════════════════════════════════════════════════════════════
+    var LOAD_FAIL_TITLE = '지금은 내용을 불러올 수 없어요';
+    var LOAD_FAIL_DESC = '인터넷 연결이 불안정하거나 일시적인 오류일 수 있어요. 잠시 후 다시 시도해 주세요.';
+    function applyLoadFailText(box, titleSel, descSel, btnClass) {
+        if (!box) { return; }
+        var t = box.querySelector(titleSel);
+        var d = box.querySelector(descSel);
+        if (t) { t.textContent = LOAD_FAIL_TITLE; }
+        if (d) { d.textContent = LOAD_FAIL_DESC; }
+        if (box.querySelector('.zia-retry')) { return; } // 중복 생성 방지
+        var retry = document.createElement('a');
+        retry.className = btnClass + ' zia-retry';
+        retry.setAttribute('href', window.location.href); // JS 없이도 재요청되는 링크
+        retry.style.marginRight = '10px';
+        retry.textContent = '다시 시도';
+        retry.addEventListener('click', function (e) {
+            e.preventDefault();
+            window.location.reload();
+        });
+        var anchor = box.querySelector('a.' + btnClass);
+        if (anchor && anchor.parentNode) { anchor.parentNode.insertBefore(retry, anchor); }
+        else { box.appendChild(retry); }
+    }
+    // 동적 페이지(정적 폴백 콘텐츠가 없는 페이지) 상태 블록 정의 — C-3 공용
+    var DYNAMIC_PAGES = [
+        { re: /\/post\.html$/, loading: 'post-loading', notfound: 'post-notfound',
+            title: '.post-state-title', desc: '.post-state-desc', btn: 'post-btn' },
+        { re: /\/zone\.html$/, loading: 'zone-loading', notfound: 'zone-notfound',
+            title: '.zone-state-title', desc: '.zone-state-desc', btn: 'zone-btn' }
+    ];
+
     var CONFIG = window.ZIA_CONFIG || {};
     var SUPA_URL = (CONFIG.supabaseUrl || '').trim().replace(/\/+$/, '');
     var SUPA_KEY = (CONFIG.supabaseKey || '').trim();
     if (!SUPA_URL || !SUPA_KEY) {
         // config 부재/빈 값 → 전체 no-op (조용히 종료).
         // 단 post.html(P3-d)·zone.html(P3-g) 은 정적 폴백 콘텐츠가 없는 동적 페이지 —
-        // "불러오는 중" 고착 방지 위해 notfound 상태로 전환 후 종료.
-        var dynamicPages = [
-            { re: /\/post\.html$/, loading: 'post-loading', notfound: 'post-notfound' },
-            { re: /\/zone\.html$/, loading: 'zone-loading', notfound: 'zone-notfound' }
-        ];
-        dynamicPages.forEach(function (pg) {
+        // "불러오는 중" 고착 방지 위해 상태 블록으로 전환 후 종료.
+        // ⚠ C-3: 설정 부재 = 조회 자체가 불가능한 상태 → "없는 분야"가 아니라
+        //   "지금 불러올 수 없다"로 알린다 (원인 오진단 금지).
+        DYNAMIC_PAGES.forEach(function (pg) {
             if (!pg.re.test(window.location.pathname)) { return; }
             document.addEventListener('DOMContentLoaded', function () {
                 var loading = document.getElementById(pg.loading);
                 var notfound = document.getElementById(pg.notfound);
                 if (loading) { loading.style.display = 'none'; }
                 if (notfound) { notfound.style.display = ''; }
+                applyLoadFailText(notfound, pg.title, pg.desc, pg.btn);
             });
         });
         markInjectDone(); // P3-e — config 부재 no-op 경로도 완료 신호 (오버레이 대기 해제)
@@ -353,6 +397,22 @@
         return 'zone'; // ZONE 상세 후보 — zones.page_path 매칭으로 확정 (향후 구축 페이지 자동 커버)
     }
     var KIND = detectKind();
+
+    // ── C-1 — 홈 진료탭 "글 카드 영역" 원본 템플릿 (index 전용) ──────────────────
+    // 정적 마크업은 .clinic-case-area(태그 필터 + 카드 캐러셀)를 **1번 탭 패널에만** 두고
+    // 있다. 그래서 ① 방문자가 2~5번 탭을 누르면 카드 영역이 아예 없고 ② 수정 모드의
+    // "홈 칸 배치"도 첫 분야에서만 가능했다. 나머지 패널에도 같은 영역을 런타임 생성해
+    // 모든 분야가 동일하게 동작하게 한다.
+    // ⚠ index.html 정적 마크업은 무수정(원스 무손상) — injectHomeRecent(I15)가 이미
+    //   런타임 생성으로 처리한 선례를 그대로 답습한다.
+    // ⚠ 본 스크립트는 </body> 직전 동기 실행 = 인라인 initClinicCases()(DOMContentLoaded)
+    //   실행 **전**이다. 즉 지금 복제하면 Swiper 가 손대기 전 순정 마크업을 얻는다
+    //   (초기화 후 복제하면 swiper-* 클래스·인라인 transform 이 함께 복제된다).
+    var HOME_CASE_TPL = null;
+    if (KIND === 'index') {
+        var tplSrc = document.querySelector('.section-05 .tab-panel .clinic-case-area');
+        if (tplSrc) { HOME_CASE_TPL = tplSrc.cloneNode(true); }
+    }
 
     // 글 상세 대상 id (?id= 숫자만 허용 — 쿼리 문자열 직결 주입 차단)
     var POST_ID = null;
@@ -659,7 +719,21 @@
         var bo = (b.home_tab_order == null) ? 9999 : b.home_tab_order;
         return (ao - bo) || (a.sort_order - b.sort_order) || (a.id - b.id);
     }
-    function injectHomeTabs(zones, tags, posts) {
+    // C-1 — 케이스 영역 1장 새로 만들기. 첫 패널의 구조·클래스를 그대로 복제하고
+    //        데모 콘텐츠(태그·카드)만 비운 빈 껍데기를 돌려준다. 원스 CSS 가 그대로
+    //        적용되므로 디자인 이질감이 없다 (셀렉터가 .tab-panel 하위 기준이라 위치도 동일).
+    function newCaseArea() {
+        if (!HOME_CASE_TPL) { return null; }
+        var area = HOME_CASE_TPL.cloneNode(true);
+        var tagList = area.querySelector('.tag-list');
+        if (tagList) { clearEl(tagList); }       // 1번 분야 태그가 딸려오면 안 된다
+        var wrap = area.querySelector('.case-swiper .swiper-wrapper');
+        if (wrap) { clearEl(wrap); }             // 데모 카드가 딸려오면 안 된다 (C-2 와 동일 사유)
+        var fill = area.querySelector('.progress-fill');
+        if (fill) { fill.style.width = '0%'; }
+        return area;
+    }
+    function injectHomeTabs(zones, tags, posts, postsLoaded) {
         if (!window.Swiper) { return; }
         var container = qs('.section-05 .tab-container');
         var group = document.getElementById('contents-group-line');
@@ -738,11 +812,19 @@
 
         // I5 — 패널 헤더 (english_label/name/description/hero_image_path)
         tabZones.forEach(function (z, i) { fillPanelVisual(panels[i], z); });
-        // I6/I7 — 케이스 영역 보유 패널에 태그·글 주입 (정적으론 패널1=자율신경계만 보유).
-        //         홈 캐러셀은 home_slot 지정 글만 (계약 v1.1 — homeOnly).
+        // I6/I7 — 케이스 영역에 태그·글 주입. 홈 캐러셀은 home_slot 지정 글만 (계약 v1.1).
+        // C-1 — 정적으론 패널1(자율신경계)만 영역을 갖고 있어 2~5번 탭이 빈 화면이었다.
+        //       나머지 패널에도 같은 영역을 만들어 모든 분야가 동일하게 동작하게 한다.
+        //       단 **채울 것이 있을 때만** 만든다: posts 조회 실패(null) 시엔 만들지 않아
+        //       종전 폴백(정적 placeholder) 그대로다 (원칙 1 — 실패 시 화면 변경 0).
+        var canBuildArea = !!(postsLoaded || EDIT_MODE);
         tabZones.forEach(function (z, i) {
             var area = panels[i].querySelector('.clinic-case-area');
-            if (area) { setupCaseArea(area, z, tags, posts, true); }
+            if (!area && canBuildArea) {
+                area = newCaseArea();
+                if (area) { panels[i].appendChild(area); }
+            }
+            if (area) { setupCaseArea(area, z, tags, posts, true, postsLoaded); }
         });
         // I15 (P3-g) — 캐러셀 아래 "이 분야 최근 글" 누적 블록 (런타임 DOM 생성).
         //   패널마다 자기 ZONE 글만 담으므로 탭 전환 = 자동 갱신.
@@ -785,23 +867,82 @@
     // ========================================================================
     // I6/I7 · A1/A2 — ZONE 태그 필터 + 연계 캐러셀 (index 탭 패널 / ZONE 상세 공용)
     // ========================================================================
-    function setupCaseArea(area, zone, tags, posts, homeOnly) {
+    // ── C-2 — "주입 성공 + 글 0건" 빈 상태 ────────────────────────────────────
+    // 원스 템플릿의 데모 케이스 카드 6장(`자율신경실조증, 단순 스트레스가 아닙니다!` 등)은
+    // 실재하지 않는 진료 사례다. 발행 글이 0건이라는 이유로 그대로 노출되면 의료광고법
+    // §56(거짓·과장 광고) 소지가 있고, 어느 관리 화면으로도 지울 수 없다.
+    // ⚠ 이는 계약 §1 원칙 1(실패 시 정적 유지)의 **예외가 아니라 별개 경우**다:
+    //     · posts 조회 실패(null)      → 정적 유지 (Graceful degradation 그대로)
+    //     · posts 조회 성공 + 0건([])  → 데모 카드 미노출 + 담백한 안내
+    //   두 경우를 setupCaseArea 의 postsLoaded 인자로 명시 구분한다.
+    var CASE_EMPTY_TEXT = '아직 등록된 글이 없어요.';
+    function ensureCaseEmptyStyles() {
+        if (document.getElementById('zia-case-empty-style')) { return; }
+        var css = [
+            '.zia-case-empty{margin:0;padding:56px 20px;text-align:center;color:#5A5652;',
+            'font-size:15px;line-height:1.6;}',
+            '@media screen and (min-width:1200px){.zia-case-empty{padding:72px 20px;font-size:16px;}}'
+        ].join('');
+        var st = document.createElement('style');
+        st.id = 'zia-case-empty-style';
+        st.appendChild(document.createTextNode(css));
+        (document.head || document.body).appendChild(st);
+    }
+    // keepHeader = true → 태그 필터는 남긴다 (태그를 눌러 결과가 0건이 된 경우.
+    //   헤더까지 숨기면 다른 태그로 되돌아갈 수단이 사라진다)
+    function emptyCaseArea(area, keepHeader) {
+        var swiperEl = area.querySelector('.case-swiper');
+        destroySwiperOn(swiperEl); // 원칙 3
+        var wrap = swiperEl ? swiperEl.querySelector('.swiper-wrapper') : null;
+        if (wrap) { clearEl(wrap); } // 데모 카드는 숨기는 게 아니라 DOM 에서 제거한다
+        if (swiperEl) { swiperEl.style.display = 'none'; } // 빈 진행바까지 사라지게
+        var header = area.querySelector('.area-header');
+        if (header) { header.style.display = keepHeader ? '' : 'none'; }
+        ensureCaseEmptyStyles();
+        var msg = area.querySelector('.zia-case-empty');
+        if (!msg) {
+            msg = document.createElement('p');
+            msg.className = 'zia-case-empty';
+            msg.textContent = CASE_EMPTY_TEXT;
+            area.appendChild(msg);
+        }
+        msg.style.display = '';
+    }
+    // 빈 상태 → 카드 있는 상태 복귀 (태그 필터 전환·재주입 안전)
+    function showCaseArea(area) {
+        var swiperEl = area.querySelector('.case-swiper');
+        if (swiperEl) { swiperEl.style.display = ''; }
+        var header = area.querySelector('.area-header');
+        if (header) { header.style.display = ''; }
+        var msg = area.querySelector('.zia-case-empty');
+        if (msg) { msg.style.display = 'none'; }
+    }
+    function setupCaseArea(area, zone, tags, posts, homeOnly, postsLoaded) {
         var zoneTags = (tags || []).filter(function (t) { return t.zone_slug === zone.slug; });
         var zonePosts = (posts || []).filter(function (p) { return p.zone_slug === zone.slug; });
         if (homeOnly) {
             // I7 (v1.1) — 홈 캐러셀 = home_slot 지정 글만 home_slot 순 (슬롯 픽커 소관).
-            //             0건 → 정적 데모 카드 유지 (원칙 1).
             zonePosts = zonePosts.filter(function (p) { return p.home_slot != null; });
             zonePosts.sort(function (a, b) { return a.home_slot - b.home_slot; });
         }
         // P3-f L2 — 수정 모드의 홈 캐러셀만 "1~6번 칸" 형태로 그린다 (빈 칸도 눌러서 채우도록).
         //           일반 방문자·ZONE 상세(A2)·아카이브(Z3) 는 slotZone = null → 종전 그대로.
         var slotZone = (homeOnly && EDIT_MODE) ? zone : null;
-        // I7/A2 — 해당 ZONE 소속 글만 자동 호출 (§7.1). 0건 → 정적 데모 카드 유지.
+        // I7/A2 — 해당 ZONE 소속 글만 자동 호출 (§7.1).
         //         (수정 모드 홈은 0건이어도 빈 칸 6개를 그려야 채워 넣을 수 있다)
-        if (zonePosts.length || slotZone) { rebuildCaseSwiper(area, zonePosts, slotZone); }
-        // I6/A1 — 태그 주입 성공 시 정적 alert() 핸들러는 DOM 교체로 소멸 → 실 필터로 대체.
-        //         태그 주입 실패(0건·fetch 실패) 시 정적 태그·alert 핸들러 불변 (계약 폴백 원칙).
+        if (zonePosts.length || slotZone) {
+            showCaseArea(area);
+            rebuildCaseSwiper(area, zonePosts, slotZone);
+            // I6/A1 — 태그 주입 성공 시 정적 alert() 핸들러는 DOM 교체로 소멸 → 실 필터로 대체.
+            if (zoneTags.length) { rebuildTagList(area, zoneTags, zonePosts, slotZone); }
+            return;
+        }
+        if (postsLoaded) {
+            emptyCaseArea(area); // C-2 — 주입 성공 + 발행 글 0건 → 데모 카드 미노출
+            return;
+        }
+        // posts 조회 실패·타임아웃 → 정적 데모 카드 유지 (계약 §1 원칙 1)
+        // 태그는 별도 소스라 성공했으면 주입한다 (실패 시 정적 태그·alert 핸들러 불변).
         if (zoneTags.length) { rebuildTagList(area, zoneTags, zonePosts, slotZone); }
     }
     // 글 클릭 타깃 사다리 (계약 v1.1 §7.4): external_url(새 탭) > has_body → 온사이트 상세 > 비링크
@@ -818,6 +959,27 @@
             a.setAttribute('href', '#none');
         }
     }
+    // ── C-7 — 대표 사진이 없는 카드의 제목 가독성 ────────────────────────────
+    // 카드 바탕(.case-card)은 밝은 회색(#eee)이고 제목은 흰 글씨다. 사진이 없으면
+    // .info-overlay 의 검정 그라데이션만 남는데 상단부는 거의 투명(40% 지점 alpha 0.1)이라
+    // 흰 제목이 밝은 회색 위에 얹혀 읽히지 않는다(측정 3.6:1 — WCAG AA 4.5:1 미달).
+    // → 사진 없는 카드에는 .img-bg 자체에 브랜드 남색 그라데이션을 깔아 어떤 지점에서도
+    //   흰 글씨 대비가 확보되게 한다 (기존 CSS 는 .img-bg 에 background 를 지정하지 않아
+    //   충돌 없음. !important 불필요).
+    function ensureNoImgStyles() {
+        if (document.getElementById('zia-card-noimg-style')) { return; }
+        var css = [
+            '.case-card.zia-card-noimg .img-bg{',
+            'background:linear-gradient(135deg,#3D4F73 0%,#22344C 100%);}',
+            // 사진이 없으면 아래쪽 검정 그라데이션이 과해 보이므로 살짝만 남긴다
+            '.case-card.zia-card-noimg .info-overlay{',
+            'background:linear-gradient(to bottom,rgba(0,0,0,0) 0%,rgba(0,0,0,.28) 100%);}'
+        ].join('');
+        var st = document.createElement('style');
+        st.id = 'zia-card-noimg-style';
+        st.appendChild(document.createTextNode(css));
+        (document.head || document.body).appendChild(st);
+    }
     // 카드 1장 (<a class="case-card">) — 캐러셀 슬라이드(I7/A2)와 아카이브 그리드(Z3) 공용.
     function caseCard(p) {
         var a = document.createElement('a');
@@ -831,6 +993,9 @@
             img.setAttribute('src', resolveAsset(p.thumbnail_path));
             img.setAttribute('alt', p.title || '');
             imgBg.appendChild(img);
+        } else {
+            a.className += ' zia-card-noimg'; // C-7 — 사진 없는 카드 가독성 확보
+            ensureNoImgStyles();
         }
         a.appendChild(imgBg);
         var overlay = document.createElement('div');
@@ -927,6 +1092,7 @@
             list.forEach(function (p) { wrap.appendChild(caseSlide(p)); });
         }
         var progress = area.querySelector('.progress-fill');
+        ensureFewStyles();
         // 인라인 초기화(index initClinicCases / autonomic initSubClinicCases)와 동일 파라미터
         new window.Swiper(swiperEl, {
             slidesPerView: 1.2,
@@ -943,10 +1109,29 @@
                 1200: { slidesPerView: 3, spaceBetween: 40 }
             },
             on: {
-                init: function () { updateProgress(this, progress); },
+                init: function () { updateProgress(this, progress); markFew(this); },
+                breakpoint: function () { markFew(this); },
                 slideChange: function () { updateProgress(this, progress); }
             }
         });
+    }
+    // ── 칸을 일부만 채웠을 때의 모양 (C-2 후속) ────────────────────────────────
+    // 홈 칸 6개 중 1~2개만 채우면 카드가 왼쪽에 몰리고 오른쪽이 텅 비어 "홈이 비었다"로
+    // 읽힌다. 한 화면에 들어오는 수보다 카드가 적으면 가운데로 모아 의도된 배치로 보이게 한다.
+    // (Swiper 는 이때 슬라이드가 잠기므로 transform 이 0 — 정렬만 바꾸면 충분하다)
+    function ensureFewStyles() {
+        if (document.getElementById('zia-few-style')) { return; }
+        var st = document.createElement('style');
+        st.id = 'zia-few-style';
+        st.appendChild(document.createTextNode(
+            '.case-swiper.zia-few .swiper-wrapper{justify-content:center;}'));
+        (document.head || document.body).appendChild(st);
+    }
+    function markFew(sw) {
+        if (!sw || !sw.el || !sw.params) { return; }
+        var per = parseFloat(sw.params.slidesPerView) || 1;
+        var few = sw.slides && sw.slides.length > 0 && sw.slides.length < per;
+        sw.el.classList[few ? 'add' : 'remove']('zia-few');
     }
     function rebuildTagList(area, zoneTags, zonePosts, slotZone) {
         var listEl = area.querySelector('.tag-list');
@@ -975,6 +1160,11 @@
                         return (p.tag_names || []).indexOf(item.tag.name) !== -1;
                     })
                     : zonePosts;
+                if (!filtered.length && !slotZone) {
+                    emptyCaseArea(area, true); // 이 태그에 글 0건 — 태그 줄은 남긴다
+                    return;
+                }
+                showCaseArea(area);
                 rebuildCaseSwiper(area, filtered, slotZone);
             });
             li.appendChild(a);
@@ -984,7 +1174,7 @@
     // A1/A2 — ZONE 상세 (autonomic.html + 향후 구축 페이지). 페이지 → zone 매칭은
     // zones.page_path suffix 비교 (계약 A1 의 <body data-zone> 권장안은 마크업 수정이
     // 필요해 배제 — 마크업 무손상 원칙 우선. page_path 가 동일 판별을 데이터로 제공).
-    function injectZoneDetail(zones, tags, posts) {
+    function injectZoneDetail(zones, tags, posts, postsLoaded) {
         var area = qs('.section-clinic-cases .clinic-case-area');
         if (!area) { return; }
         var zone = null;
@@ -993,7 +1183,7 @@
         });
         if (!zone) { return; } // 매칭 실패 → 정적 유지
         stampRow(qs('.section-clinic-cases'), 'data-zone-id', zone.id); // 편집기 행 특정
-        setupCaseArea(area, zone, tags, posts);
+        setupCaseArea(area, zone, tags, posts, false, postsLoaded);
     }
 
     // ========================================================================
@@ -1025,9 +1215,19 @@
             '.zone-recent .zone-recent-list{border-top:1px solid #E4E0DA;}',
             '.zone-recent .zone-recent-list li{border-bottom:1px solid #E4E0DA;}',
             '.zone-recent .zone-recent-list li a{display:flex;align-items:center;gap:10px;min-height:52px;padding:12px 0;color:#3A3733;}',
-            '.zone-recent .zone-recent-list .badge{flex:none;font-size:12px;font-weight:600;color:#fff;background:#2E3F66;border-radius:34px;padding:4px 12px;}',
-            '.zone-recent .zone-recent-list .title{flex:1 1 auto;font-size:15px;line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+            '.zone-recent .zone-recent-list .badge{flex:none;font-size:12px;font-weight:600;color:#fff;background:#2E3F66;border-radius:34px;padding:4px 12px;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+            '.zone-recent .zone-recent-list .title{flex:1 1 auto;min-width:0;font-size:15px;line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;overflow-wrap:anywhere;}',
             '.zone-recent .zone-recent-list .date{flex:none;font-size:13px;color:#989490;}',
+            // V-3 — 좁은 화면에서는 꼬리표·날짜가 가로폭을 나눠 먹어 제목이 5~6자만 보였다
+            //   (390 폭 실측 제목 87px = 노출률 10.6%). 제목을 첫 줄 전폭으로 올리고
+            //   꼬리표·날짜를 아랫줄로 내려 제목이 실질적으로 읽히게 한다.
+            '@media screen and (max-width:767px){',
+            '.zone-recent .zone-recent-list li a{flex-wrap:wrap;align-items:flex-start;gap:6px 8px;}',
+            '.zone-recent .zone-recent-list .title{order:1;flex:1 1 100%;white-space:normal;',
+            'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}',
+            '.zone-recent .zone-recent-list .badge{order:2;max-width:70%;}',
+            '.zone-recent .zone-recent-list .date{order:3;}',
+            '}',
             '@media screen and (min-width:1200px){.zone-recent{padding:0;margin-top:48px;}.zone-recent .zone-recent-title{font-size:18px;}.zone-recent .zone-recent-list .title{font-size:16px;}}'
         ].join('\n');
         var st = document.createElement('style');
@@ -1101,12 +1301,18 @@
     // 글은 전건 로드하지 않고 offset/limit 페이지네이션 (누적 무제한 대비).
     // "더 있음" 판별은 limit+1 건 요청으로 (Content-Range 헤더 노출 의존 X).
     // ========================================================================
-    function zoneShow(which) { // 'loading' | 'notfound' | 'main'
+    // 'loading' | 'notfound'(진짜 없는 분야) | 'error'(조회 실패 — C-3) | 'main'
+    function zoneShow(which) {
         var ids = { loading: 'zone-loading', notfound: 'zone-notfound', main: 'zone-main' };
+        var box = (which === 'error') ? 'notfound' : which;
         Object.keys(ids).forEach(function (k) {
             var el = document.getElementById(ids[k]);
-            if (el) { el.style.display = (k === which) ? '' : 'none'; }
+            if (el) { el.style.display = (k === box) ? '' : 'none'; }
         });
+        if (which === 'error') {
+            applyLoadFailText(document.getElementById('zone-notfound'),
+                '.zone-state-title', '.zone-state-desc', 'zone-btn');
+        }
     }
     function fetchZonePosts(slug, tagName, offset) {
         var q = 'v_public_posts?select=*&zone_slug=eq.' + encodeURIComponent(slug) +
@@ -1121,8 +1327,12 @@
     }
     function injectZoneArchive(zones, tags) {
         if (!document.getElementById('zone-main')) { return; } // zone.html 골격 아님 → no-op
+        // C-3 — zones 조회 실패(null)를 "없는 분야"로 오진단하지 않는다.
+        //       통신 장애인데 "해당 분야가 내려갔다"고 알리면 사실과 다른 안내가 된다.
+        if (zones === null) { zoneShow('error'); return; }
         var zone = null;
         (zones || []).forEach(function (z) { if (!zone && z.slug === ZONE_SLUG) { zone = z; } });
+        // 여기까지 왔으면 조회는 성공했다 → 진짜 없는 분야 / 잘못된 주소
         if (!ZONE_SLUG || !zone) { zoneShow('notfound'); return; }
 
         // Z1 — 분야 히어로 (name / description / english_label)
@@ -1385,9 +1595,7 @@
             });
         }
 
-        // F3 — 전 건 로드 → 페이지네이션 숨김 (계약 MVP 허용안)
-        var pag = qs('.section-faq-list .pagination-container');
-        if (pag) { pag.style.display = 'none'; }
+        // F3 — 페이지네이션 숨김은 hideDeadPagination() 이 전 상태 공통으로 처리한다 (C-5)
     }
 
     // ========================================================================
@@ -1492,9 +1700,7 @@
         if (!grid || !reviews.length) { return; } // 0건 → 정적 9카드 유지
         clearEl(grid);
         reviews.forEach(function (r) { grid.appendChild(reviewGridItem(r, S)); });
-        // R3 — 전 건 로드 → 페이지네이션 숨김 (계약 MVP 허용안)
-        var pag = qs('.section-review-list .pagination-container');
-        if (pag) { pag.style.display = 'none'; }
+        // R3 — 페이지네이션 숨김은 hideDeadPagination() 이 전 상태 공통으로 처리한다 (C-5)
     }
 
     // ========================================================================
@@ -1599,6 +1805,86 @@
     }
 
     // ========================================================================
+    // C-6 — 같은 정본 값을 소비하는 지점 동시 갱신 ("거울")
+    // ------------------------------------------------------------------------
+    // 현상: 미리보기에서 footer 전화번호를 고쳐 저장하면 footer 만 새 값이 되고, 같은
+    //   화면 위쪽 §8 "찾아오시는 길"의 전화번호는 새로고침 전까지 옛 값 그대로였다.
+    //   원장 입장에서는 "저장이 안 됐나?" 하고 다시 누르거나, 두 값이 원래 다른 줄 알고
+    //   위쪽도 또 고치게 된다 (같은 정본을 두 번 고치는 셈).
+    // 원인: 편집기는 방금 고친 **그 요소 하나만** 즉시 반영한다(낙관적 적용). 같은
+    //   site_settings 키를 소비하는 다른 자리는 다음 로드까지 옛 값을 보인다.
+    // 해법(본 파일 소관): 편집기·admin 을 건드리지 않고, 같은 키를 쓰는 지점들을 서로
+    //   **거울**로 묶어 한쪽이 바뀌면 나머지를 같은 값으로 맞춘다. 감시는
+    //   MutationObserver — 누가 어떤 경로로 바꿨든(편집기 낙관적 적용, 저장 회신 값,
+    //   자유 편집 오버라이드) 동일하게 따라간다.
+    // 범위: ?edit=1 수정 모드에서만 동작한다 (일반 방문자에게는 관찰자·리스너 0 —
+    //   회귀 금지선. 방문자는 주입 시점에 이미 전 지점이 같은 값으로 채워진다).
+    // 대상 산출: ZIA_FIELD_MAP 에서 site_settings 정본 + kind 'text' 인 엔트리를 키별로
+    //   묶는다(단일 소스 재사용). 여기에 계약 §3 I11(홈 §8 진료일정)처럼 **접두어를 합성해
+    //   표시하는 자리**를 접두 규칙과 함께 보탠다 — FIELD_MAP 에는 정본 오염 방지를 위해
+    //   등록하지 않지만, 화면 동기화 대상인 것은 분명하기 때문이다.
+    // ========================================================================
+    var MIRROR_EXTRA = [
+        // 계약 I11 — 주입이 '평일 '/'주말·공휴일 '/'*점심시간 ' 접두를 합성해 표시한다.
+        { key: 'hours_weekday', selector: '.section-08 .info-list .time dd p:nth-of-type(1) strong', prefix: '평일 ' },
+        { key: 'hours_weekend', selector: '.section-08 .info-list .time dd p:nth-of-type(2) strong', prefix: '주말·공휴일 ' },
+        { key: 'hours_lunch', selector: '.section-08 .info-list .time dd .notice', prefix: '*점심시간 ' }
+    ];
+    function mirrorGroups() {
+        var groups = {};
+        function add(key, selector, prefix) {
+            if (!groups[key]) { groups[key] = []; }
+            groups[key].push({ selector: selector, prefix: prefix || '' });
+        }
+        Object.keys(FIELD_MAP).forEach(function (id) {
+            var f = FIELD_MAP[id];
+            if (!f.source || f.source.table !== 'site_settings' || !f.source.key) { return; }
+            if (f.kind && f.kind !== 'text') { return; } // 링크 칩(link)·사진은 제외
+            add(f.source.key, f.selector, '');
+        });
+        MIRROR_EXTRA.forEach(function (m) { add(m.key, m.selector, m.prefix); });
+        return groups;
+    }
+    // 표시 문자열에서 접두를 떼어 낸 "정본 값"
+    function mirrorRead(n) {
+        var text = (n.el.textContent || '').trim();
+        if (n.prefix && text.indexOf(n.prefix) === 0) { text = text.slice(n.prefix.length); }
+        return text;
+    }
+    function setupValueMirrors() {
+        if (!EDIT_MODE) { return; }               // 일반 방문자 → 무동작
+        if (!window.MutationObserver) { return; } // 구형 브라우저 → 종전 동작(무해)
+        var groups = mirrorGroups();
+        Object.keys(groups).forEach(function (key) {
+            var nodes = [];
+            groups[key].forEach(function (m) {
+                qsa(m.selector).forEach(function (el) { nodes.push({ el: el, prefix: m.prefix }); });
+            });
+            if (nodes.length < 2) { return; } // 이 페이지엔 자리가 하나뿐 → 묶을 것이 없다
+            // 묶음마다 "현재 값"을 들고 있다가, 관찰자가 그 값과 같은 변경을 보면 자기 갱신으로
+            // 보고 흘려보낸다. 전역 플래그를 쓰면 같은 tick 에 여러 묶음이 바뀔 때
+            // (편집기가 여러 값을 잇달아 적용하는 경우) 뒤 묶음이 통째로 무시된다.
+            var cur = { value: mirrorRead(nodes[0]) };
+            nodes.forEach(function (n) {
+                var ob = new window.MutationObserver(function () {
+                    var text = mirrorRead(n);
+                    if (!text) { return; }              // 빈 값은 전파하지 않는다 (편집 중간 상태)
+                    if (text === cur.value) { return; } // 이미 맞춰 놓은 값 = 자기 갱신
+                    cur.value = text;
+                    nodes.forEach(function (other) {
+                        if (other.el === n.el) { return; }
+                        var want = other.prefix + text;
+                        if ((other.el.textContent || '').trim() !== want) {
+                            other.el.textContent = want;
+                        }
+                    });
+                });
+                ob.observe(n.el, { childList: true, characterData: true, subtree: true });
+            });
+        });
+    }
+
+    // ========================================================================
     // P3-f — 자유 편집 결과(page_overrides) 읽어 화면에 반영  [계약 §3 · §9]
     // ------------------------------------------------------------------------
     // · 대상: v_public_page_overrides (anon SELECT 공개 뷰) 의 **현재 페이지 파일명**분만.
@@ -1669,20 +1955,30 @@
         function pad(n) { return (n < 10 ? '0' : '') + n; }
         return d.getFullYear() + '.' + pad(d.getMonth() + 1) + '.' + pad(d.getDate());
     }
-    function postShow(which) { // 'loading' | 'notfound' | 'article'
+    // 'loading' | 'notfound'(진짜 없는 글) | 'error'(조회·리소스 실패 — C-3) | 'article'
+    function postShow(which) {
         var ids = { loading: 'post-loading', notfound: 'post-notfound', article: 'post-article' };
+        var box = (which === 'error') ? 'notfound' : which;
         Object.keys(ids).forEach(function (k) {
             var el = document.getElementById(ids[k]);
-            if (el) { el.style.display = (k === which) ? '' : 'none'; }
+            if (el) { el.style.display = (k === box) ? '' : 'none'; }
         });
+        if (which === 'error') {
+            applyLoadFailText(document.getElementById('post-notfound'),
+                '.post-state-title', '.post-state-desc', 'post-btn');
+        }
     }
     function injectPostDetail(rows, zones) {
         if (!document.getElementById('post-article')) { return; } // post.html 골격 아님 → no-op
-        var row = rows && rows.length ? rows[0] : null;
+        // C-3 — zone.html 과 동일 구조. 조회 실패(null)와 진짜 없는 글([])을 구분한다.
+        //   · rows === null : fetch 실패·타임아웃 → "지금은 불러올 수 없어요" + 다시 시도
+        //   · rows.length 0 : ?id 부재·미발행·삭제       → "글을 찾을 수 없습니다"
+        if (rows === null) { postShow('error'); return; }
+        var row = rows.length ? rows[0] : null;
+        if (!row) { postShow('notfound'); return; }
+        // sanitizer 스크립트 로드 실패 = 리소스 조회 실패 → 다시 시도로 풀릴 수 있다
         var sanitizer = window.ZiaSanitize;
-        // fetch 실패·0건·id 부재·sanitizer 부재 → "글을 찾을 수 없습니다"
-        // (본 페이지는 정적 폴백 콘텐츠가 없는 동적 페이지 — notfound 가 곧 폴백 상태)
-        if (!row || !sanitizer) { postShow('notfound'); return; }
+        if (!sanitizer) { postShow('error'); return; }
 
         // 편집기 행 특정 (post.title/badge/body .detail — #post-article 하위 전체가 이 행)
         stampRow(document.getElementById('post-article'), 'data-post-id', row.id);
@@ -1721,21 +2017,341 @@
     }
 
     // ========================================================================
+    // P3-h — 테마 주입 (원장이 고른 색·글자 배율, site_settings theme_* 키)
+    // ------------------------------------------------------------------------
+    // [원리] 원스 CSS/HTML 무수정 — <style id="zia-theme"> 한 장을 head "맨 끝"에
+    //   만들어 얹는다. 브랜드 색은 var(--color-primary) 토큰(29곳)만이 아니라
+    //   리터럴 #B79A78(50곳: style 22·main 10·sub 18)로도 박혀 있어 :root 재선언만으론
+    //   사이트의 63%가 옛 색으로 남는다. 그래서 빌드 타임에 scripts/gen_theme_map.py 가
+    //   리터럴 선언 전수 지도를 theme-map.generated.js(window.ZIA_THEME_MAP)로 구워 두고,
+    //   여기서 같은 선택자·같은 미디어쿼리로 재선언해 덮는다.
+    //   head 맨 끝 = 정적 <link>·인라인 <style>(post/zone, head 안 실측)보다 뒤
+    //   = 동일 특이성에서 캐스케이드 승리. 원본 !important 는 !important 로 복제.
+    // [키] theme_brand(기본 색) / theme_brand2(보조 색) / theme_brand3(짙은 색 —
+    //   미지정 시 brand2 에서 채널 비율 파생) / theme_text(본문 글씨 색) /
+    //   theme_font_scale(글자 배율 0.8~1.4) / theme_radius(버튼·입력 모서리 배율 0~2).
+    //   호버 어둡기(#9C8567/#0E1A3B)·post/zone 네이비(#22344C)는 기준 색에서 자동 파생
+    //   — 지도 tokens 의 ratio 가 정본 (하드코딩 X).
+    // [검증 — CSS 주입 차단] 색 = #rgb/#rrggbb 만, 배율 = 유한 숫자 범위만 허용.
+    //   그 외 값("red; } body{display:none" / "javascript:..." 등)은 통째 무시.
+    //   admin 저장 검증과 독립인 이중 방어 — 여기 값은 문자열 결합으로 CSS 가 되므로
+    //   화이트리스트 형식 검증 없이는 절대 넣지 않는다.
+    // [Graceful degradation] 유효한 theme_* 값이 하나도 없으면 지도 로드(네트워크
+    //   요청)조차 하지 않고 DOM 무변화로 종료 — 현재 화면과 100% 동일 (원칙 1).
+    // [실패] 지도 로드 실패 시 색·글자 규칙은 통째 포기한다 — :root 토큰만 덮으면
+    //   "새 색 37% + 옛 색 63%" 두 색 쪼개짐이 나와서, 부분 적용이 무적용보다 나쁘다.
+    //   (theme_radius 는 지도 무관이라 그대로 적용.)
+    // ========================================================================
+    var THEME_COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+    // 버튼·입력 모서리 토큰 (style.css :root 실측). theme_radius 는 이 토큰들의 배율만
+    // 담당한다 — border-radius 리터럴(카드 등)은 대상 밖 (한계 명시).
+    var THEME_RADIUS_TOKENS = ['--input-radius', '--input-lg-radius',
+        '--btn-lg-radius', '--btn-lg-radius-full', '--btn-sm-radius',
+        '--btn-sm-radius-full', '--btn-xs-radius', '--btn-xs-radius-full'];
+
+    // 색 검증 + '#rrggbb' 소문자 정규화. 불합격 = '' (무시)
+    function themeHex(raw) {
+        raw = String(raw == null ? '' : raw).trim();
+        if (!THEME_COLOR_RE.test(raw)) { return ''; }
+        if (raw.length === 4) {
+            raw = '#' + raw.charAt(1) + raw.charAt(1) + raw.charAt(2) + raw.charAt(2) +
+                raw.charAt(3) + raw.charAt(3);
+        }
+        return raw.toLowerCase();
+    }
+    function themeRgb(hex) {
+        return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16),
+            parseInt(hex.slice(5, 7), 16)];
+    }
+    // 파생색 = 기준색 채널 × ratio (0~255 클램프) — 지도 tokens.ratio 소비
+    function themeDerive(baseHex, ratio) {
+        var rgb = themeRgb(baseHex);
+        var out = '#';
+        for (var i = 0; i < 3; i++) {
+            var c = Math.round(rgb[i] * ratio[i]);
+            if (c > 255) { c = 255; }
+            if (c < 0) { c = 0; }
+            var h = c.toString(16);
+            out += (h.length < 2 ? '0' : '') + h;
+        }
+        return out;
+    }
+    function themeNum(raw, min, max) {
+        raw = String(raw == null ? '' : raw).trim();
+        if (!/^[0-9.]+$/.test(raw)) { return null; } // 숫자 문자만 (e표기·부호도 배제)
+        var v = parseFloat(raw);
+        return (isFinite(v) && v >= min && v <= max) ? v : null;
+    }
+    // 지도 lazy load — loadSanitizer 패턴 답습 (실패·타임아웃에도 cb 1회 보장)
+    function loadThemeMap(cb) {
+        if (window.ZIA_THEME_MAP) { cb(); return; }
+        var fired = false;
+        function finish() { if (fired) { return; } fired = true; cb(); }
+        var timer = setTimeout(finish, 3000);
+        var s = document.createElement('script');
+        s.src = BASE + '/static/js/theme-map.generated.js';
+        s.onload = function () { clearTimeout(timer); finish(); };
+        s.onerror = function () { clearTimeout(timer); finish(); };
+        (document.head || document.body).appendChild(s);
+    }
+    function injectTheme(rows) {
+        if (!Array.isArray(rows) || !rows.length) { return; }
+        var kv = {};
+        rows.forEach(function (r) {
+            if (r && r.key && String(r.key).indexOf('theme_') === 0) {
+                kv[r.key] = (r.value == null ? '' : String(r.value)).trim();
+            }
+        });
+        var explicit = {
+            brand: themeHex(kv.theme_brand),
+            brand2: themeHex(kv.theme_brand2),
+            brand3: themeHex(kv.theme_brand3),
+            text: themeHex(kv.theme_text)
+        };
+        var fontScale = themeNum(kv.theme_font_scale, 0.8, 1.4);
+        if (fontScale === 1) { fontScale = null; } // 배율 1 = 무변화 (규칙 생성 생략)
+        var radius = themeNum(kv.theme_radius, 0, 2);
+        if (radius === 1) { radius = null; }
+        var hasColor = !!(explicit.brand || explicit.brand2 || explicit.brand3 || explicit.text);
+        if (!hasColor && fontScale == null && radius == null) { return; } // 완전 no-op
+        if (hasColor || fontScale != null) {
+            loadThemeMap(function () { buildThemeCss(explicit, fontScale, radius); });
+        } else {
+            buildThemeCss(explicit, fontScale, radius); // radius 만 = 지도 불요
+        }
+    }
+    // 규칙 목록 → CSS 문자열 (연속 동일 미디어 체인은 한 블록으로 묶음)
+    function themeEmitRules(rules, render) {
+        var out = [];
+        var curMedia = null;
+        var buf = [];
+        function flush() {
+            if (!buf.length) { return; }
+            var body = buf.join('');
+            var chain = curMedia || [];
+            for (var i = chain.length - 1; i >= 0; i--) { body = chain[i] + '{' + body + '}'; }
+            out.push(body);
+            buf = [];
+        }
+        (rules || []).forEach(function (r) {
+            var decl = render(r);
+            if (!decl) { return; }
+            var mkey = (r.m || []).join('|');
+            if (mkey !== (curMedia || []).join('|')) { flush(); curMedia = r.m || []; }
+            buf.push(decl);
+        });
+        flush();
+        return out.join('\n');
+    }
+    function buildThemeCss(explicit, fontScale, radius) {
+        var css = [];
+        var map = window.ZIA_THEME_MAP;
+        var hasColor = !!(explicit.brand || explicit.brand2 || explicit.brand3 || explicit.text);
+        if (map && map.tokens && map.colorRules) {
+            // 토큰 해석 — 직접 지정 > 파생. 원본 기본값과 같은 값은 "미지정" 취급
+            // (규칙 0건 = 시각 무변화인데 수백 규칙을 얹는 낭비 방지).
+            var resolved = {};
+            Object.keys(map.tokens).forEach(function (name) {
+                var def = map.tokens[name];
+                if (!def || !def.key) { return; }
+                var v = explicit[String(def.key).replace('theme_', '')] || '';
+                if (v && v !== String(def.hex).toLowerCase()) { resolved[name] = v; }
+            });
+            Object.keys(map.tokens).forEach(function (name) {
+                if (resolved[name]) { return; }
+                var def = map.tokens[name];
+                if (!def || !def.from || !def.ratio) { return; }
+                var base = resolved[def.from];
+                if (base) { resolved[name] = themeDerive(base, def.ratio); }
+            });
+            var colorCss = themeEmitRules(map.colorRules, function (r) {
+                var val = '';
+                for (var i = 0; i < r.v.length; i++) {
+                    var part = r.v[i];
+                    if (typeof part === 'string') { val += part; continue; }
+                    var hex = resolved[part.t];
+                    if (!hex) { return ''; } // 미지정 토큰 포함 규칙 → 원본 유지
+                    if (part.f === 'hex') { val += hex; }
+                    else if (part.f === 'uri') { val += '%23' + hex.slice(1); }
+                    else if (part.f === 'rgb') {
+                        var c = themeRgb(hex);
+                        val += c[0] + ', ' + c[1] + ', ' + c[2];
+                    } else { return ''; }
+                }
+                return r.s + '{' + r.p + ':' + val + (r.i ? ' !important' : '') + '}';
+            });
+            if (colorCss) { css.push(colorCss); }
+            // 소스가 var(--Gold, #B79A78) 처럼 **정의되지 않은 변수 + 브랜드색 폴백**을 쓰는 자리가 있다.
+            // --Gold 는 어느 CSS 에도 정의가 없어 항상 폴백이 쓰인다. 지도가 그 선언을 덮어도,
+            // 같은 변수를 쓰는 다른 자리(다른 특이성·미디어)까지 다 잡았다고 보장할 수 없으므로
+            // 변수 자체를 정의해 한 부류를 통째로 막는다. 값 출처는 지도 tokens 와 동일.
+            if (resolved.brand) { css.push(':root{--Gold:' + resolved.brand + '}'); }
+            // 본문 글씨 색 보강 — 지도(리터럴 #22201E·var(--text-main) 소비처) 밖의
+            // 기본 텍스트 2곳: body 기본색(color: black)과 post.html 본문(.post-body #333).
+            if (resolved.text) {
+                css.push('body{color:' + resolved.text + '}');
+                css.push('.post-body{color:' + resolved.text + '}');
+            }
+            if (fontScale != null && map.fontRules) {
+                css.push(themeEmitRules(map.fontRules, function (r) {
+                    return r.s + '{font-size:calc((' + r.v + ') * ' + fontScale + ')' +
+                        (r.i ? ' !important' : '') + '}';
+                }));
+            }
+        } else if (hasColor || fontScale != null) {
+            // 지도 로드 실패 — 부분 적용(두 색 쪼개짐) 대신 통째 포기 (섹션 머리 주석)
+            if (window.console && window.console.warn) {
+                window.console.warn('[cms-inject] theme map 로드 실패 — 색/글자 테마 미적용');
+            }
+        }
+        if (radius != null) {
+            // 원본 토큰 값은 하드코딩하지 않고 실행 시점 계산값에서 읽는다 (CSS 드리프트 방지).
+            // 본 함수는 항상 CSSOM 로드 이후(fetch 콜백)라 계산값 신뢰 가능.
+            var rootStyle = null;
+            try { rootStyle = window.getComputedStyle(document.documentElement); } catch (e) { }
+            if (rootStyle) {
+                var decls = [];
+                THEME_RADIUS_TOKENS.forEach(function (tok) {
+                    var m = /^([\d.]+)px$/.exec(String(rootStyle.getPropertyValue(tok) || '').trim());
+                    if (!m) { return; }
+                    decls.push(tok + ':' + (Math.round(parseFloat(m[1]) * radius * 100) / 100) + 'px');
+                });
+                if (decls.length) { css.push(':root{' + decls.join(';') + '}'); }
+            }
+        }
+        if (!css.length) { return; }
+        var el = document.getElementById('zia-theme');
+        if (!el) {
+            el = document.createElement('style');
+            el.id = 'zia-theme';
+        }
+        el.textContent = css.join('\n');
+        // head "맨 끝" 부착 — 재호출 시에도 appendChild 가 맨 끝으로 재이동 (멱등)
+        (document.head || document.body).appendChild(el);
+    }
+
+    // ========================================================================
     // 오케스트레이션 — fetch 병렬 시작 → DOMContentLoaded 이후 주입
     // ========================================================================
+    // ========================================================================
+    // 휴진·공지 알림 (site_settings.notice_popup — 관리자 #/notice 가 저장)
+    // ------------------------------------------------------------------------
+    // 병의원에서 가장 자주 바꾸는 것이 휴진·공지다. 원스 HTML 은 손대지 않고
+    // 런타임으로만 만든다 — 값이 없거나 기간 밖이면 DOM 자체가 생기지 않는다.
+    // 수정 모드(?edit=1)에서는 띄우지 않는다: 편집 화면을 덮어 작업을 막고,
+    // 원장은 관리자 화면의 미리보기로 모양을 이미 확인한다.
+    // 닫음 상태는 localStorage 에 날짜로만 남긴다(개인정보 없음).
+    // ========================================================================
+    var NOTICE_STORE = 'zia-notice-hide';
+
+    function injectNotice(settingsRows) {
+        if (EDIT_MODE) { return; }
+        if (document.getElementById('zia-notice')) { return; }
+        var raw = '';
+        (settingsRows || []).forEach(function (r) { if (r && r.key === 'notice_popup') { raw = r.value || ''; } });
+        if (!raw) { return; }
+        var n;
+        try { n = JSON.parse(raw); } catch (e) { return; }   // 깨진 값 = 없는 것으로 (Graceful)
+        if (!n || !n.on) { return; }
+        var title = String(n.title || '').trim();
+        var body = String(n.body || '').trim();
+        if (!title && !body) { return; }
+
+        var today = todayStamp();
+        if (n.from && String(n.from) > today) { return; }    // 아직 시작 전
+        if (n.to && String(n.to) < today) { return; }        // 이미 끝남
+        // 닫아 둔 기간 안이면 띄우지 않는다. 값이 깨져도 그냥 띄운다(안 보이는 쪽이 더 나쁘다).
+        try {
+            var until = window.localStorage.getItem(NOTICE_STORE);
+            if (until && until > today) { return; }
+        } catch (e) { }
+
+        var hideDays = Number(n.hideDays);
+        if ([0, 1, 7].indexOf(hideDays) === -1) { hideDays = 1; }
+
+        var wrap = document.createElement('div');
+        wrap.id = 'zia-notice';
+        wrap.setAttribute('role', 'dialog');
+        wrap.setAttribute('aria-modal', 'true');
+        wrap.setAttribute('aria-label', title || '안내');
+        wrap.innerHTML =
+            '<div class="zia-notice-back"></div>' +
+            '<div class="zia-notice-box">' +
+            (title ? '<p class="zia-notice-title"></p>' : '') +
+            (body ? '<p class="zia-notice-body"></p>' : '') +
+            '<div class="zia-notice-foot">' +
+            (hideDays ? '<button type="button" class="zia-notice-hide"></button>' : '') +
+            '<button type="button" class="zia-notice-close">닫기</button>' +
+            '</div></div>';
+        // 글자는 textContent 로만 넣는다 — 원장이 쓴 값이 마크업이 되지 않게
+        if (title) { wrap.querySelector('.zia-notice-title').textContent = title; }
+        if (body) { wrap.querySelector('.zia-notice-body').textContent = body; }
+        if (hideDays) {
+            wrap.querySelector('.zia-notice-hide').textContent =
+                hideDays === 7 ? '일주일 동안 안 보기' : '오늘 하루 안 보기';
+        }
+
+        var style = document.createElement('style');
+        style.id = 'zia-notice-style';
+        style.textContent =
+            '#zia-notice{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px}' +
+            '#zia-notice .zia-notice-back{position:absolute;inset:0;background:rgba(0,0,0,.45)}' +
+            '#zia-notice .zia-notice-box{position:relative;max-width:380px;width:100%;background:#fff;border-radius:14px;padding:24px;box-shadow:0 16px 40px rgba(0,0,0,.28);max-height:80vh;overflow:auto}' +
+            '#zia-notice .zia-notice-title{font-size:18px;font-weight:700;margin:0 0 10px;line-height:1.4}' +
+            '#zia-notice .zia-notice-body{font-size:15px;line-height:1.65;margin:0;white-space:pre-wrap;word-break:keep-all}' +
+            '#zia-notice .zia-notice-foot{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:20px;padding-top:14px;border-top:1px solid #e9e7e4}' +
+            '#zia-notice button{min-height:44px;padding:0 14px;border-radius:8px;border:1px solid #d6d3d0;background:#fff;font-size:15px;cursor:pointer;font-family:inherit}' +
+            '#zia-notice .zia-notice-close{background:#22201e;border-color:#22201e;color:#fff;font-weight:600;min-width:88px}';
+
+        function close(remember) {
+            if (remember && hideDays) {
+                try { window.localStorage.setItem(NOTICE_STORE, addDays(today, hideDays)); } catch (e) { }
+            }
+            if (wrap.parentNode) { wrap.parentNode.removeChild(wrap); }
+            if (style.parentNode) { style.parentNode.removeChild(style); }
+            document.removeEventListener('keydown', onKey);
+        }
+        function onKey(e) { if (e.key === 'Escape' || e.keyCode === 27) { close(false); } }
+
+        wrap.querySelector('.zia-notice-close').addEventListener('click', function () { close(false); });
+        wrap.querySelector('.zia-notice-back').addEventListener('click', function () { close(false); });
+        if (hideDays) { wrap.querySelector('.zia-notice-hide').addEventListener('click', function () { close(true); }); }
+        document.addEventListener('keydown', onKey);
+
+        document.head.appendChild(style);
+        document.body.appendChild(wrap);
+        try { wrap.querySelector('.zia-notice-close').focus(); } catch (e) { }
+    }
+
+    function todayStamp() {
+        var d = new Date();
+        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+    }
+    function addDays(stamp, days) {
+        var p = String(stamp).split('-');
+        var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+        d.setDate(d.getDate() + days);
+        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+    }
+    function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
     function apply(d) {
         var zones = d.zones || [];
         var S = makeSettings(d.settings);
+        // C-2 — "조회 성공 + 0건"과 "조회 실패"를 구분해 아래로 전달한다.
+        //       fetchRows 는 실패 시 null, 성공 시 배열(0건이면 [])을 준다.
+        var postsLoaded = Array.isArray(d.posts);
         safe(function () { injectCommon(zones, S); });
         if (KIND === 'index') {
             safe(function () { injectIndexSettings(S); });
-            safe(function () { injectHomeTabs(zones, d.tags || [], d.posts || []); });
+            safe(function () { injectHomeTabs(zones, d.tags || [], d.posts || [], postsLoaded); });
             safe(function () { injectHomeFaq(zones, d.faqs || []); });
             safe(function () { injectReviewSwiper(d.reviews || [], S); });
         } else if (KIND === 'zone') {
-            safe(function () { injectZoneDetail(zones, d.tags || [], d.posts || []); });
+            safe(function () { injectZoneDetail(zones, d.tags || [], d.posts || [], postsLoaded); });
         } else if (KIND === 'zonearchive') {
-            safe(function () { injectZoneArchive(zones, d.tags || []); }); // Z1/Z2/Z3 (P3-g)
+            // C-3 — zones 는 null(조회 실패) 여부가 안내 문구를 가르므로 원본 그대로 넘긴다.
+            safe(function () { injectZoneArchive(d.zones, d.tags || []); }); // Z1/Z2/Z3 (P3-g)
         } else if (KIND === 'faq') {
             safe(function () { injectFaqPage(zones, d.faqs || []); });
         } else if (KIND === 'reviews') {
@@ -1748,8 +2364,217 @@
         }
         // about: 공통(C1~C9)만 — 본문 편집은 계약 v1.0 스코프 제외 (계약 §3 about)
 
+        // C-5 — 동작하지 않는 페이지네이션 숨김 (F3/R3). 정적 마크업의 페이지 번호는
+        //       전부 href="#none" 이고 어떤 스크립트도 바인딩하지 않는다 = 모든 상태에서
+        //       무동작인 장식 UI다. 주입 성공 여부와 무관하게 숨긴다.
+        safe(function () { hideDeadPagination(); });
+        // C-8/C-9/C-10 — 목적지 없는 CTA·후기 카드, src 없는 <img> 정리.
+        //   조회 실패로 S() 가 전부 빈 값이어도(=정적 폴백 상태) 반드시 돌아야 한다.
+        //   그 상태가 바로 "예약 버튼이 맨 위로 튕기는" 최악의 경우이기 때문이다.
+        safe(function () { hardenCtas(S); });
+        safe(function () { hardenReviewCards(); });
+        safe(function () { dropEmptyImages(); });
+        // V-1/V-2 — 긴 문자열 줄바꿈 보정 (조회 성공·실패 무관하게 적용)
+        safe(function () { ensureTextWrapStyles(); });
         // P3-f — 수정 모드 전용 "링크 주소" 칩 (일반 방문자에겐 생성 0)
         safe(function () { injectLinkChips(S); });
+        // C-6 — 같은 정본 값을 소비하는 지점이 여러 곳이면 함께 갱신 (수정 모드 전용)
+        safe(function () { setupValueMirrors(); });
+    }
+
+    // C-5 — 무동작 페이지네이션 (faq.html F3 / reviews.html R3)
+    function hideDeadPagination() {
+        qsa('.pagination-container').forEach(function (el) { el.style.display = 'none'; });
+    }
+
+    // ========================================================================
+    // C-8 — 목적지 없는 CTA (죽은 링크) 처리
+    // ------------------------------------------------------------------------
+    // 왜 필요한가 (방문자 시점 실측):
+    //   site_settings 의 link_reserve / link_kakao / link_naver_booking 이 빈 값이면
+    //   setHref()·channel.js 4-1 은 **기존 href 를 유지**한다(파괴 금지 원칙). 그 기존
+    //   href 가 퍼블 원본의 placeholder `#` 라서, 방문자가 "진료 예약하기"를 누르면
+    //   보고 있던 위치에서 **페이지 맨 위로 튕기고 주소창에 `#` 만 붙는다**(실측:
+    //   scrollY 3000 → 0, url …/index.html#). `#none` 인 지점은 아무 일도 일어나지
+    //   않는다. 어느 쪽이든 방문자에게는 "버튼이 고장난 사이트"다.
+    //
+    // 처리 원칙 — 라벨과 동작이 어긋나지 않게 두 갈래로 나눈다:
+    //   (가) 예약 CTA(진료예약·진료 예약하기) → **전화 폴백**. 예약은 전화로도 되고,
+    //        phone/link_tel 은 항상 채워져 있는 값이라 반드시 동작한다.
+    //   (나) 채널 전용 버튼(카카오상담·네이버예약) → **숨김**. 카카오 채널이 없는데
+    //        전화로 보내면 라벨과 동작이 어긋나고, 없는 채널을 안내하는 셈이 된다.
+    //
+    // 되돌리기: 관리 화면에서 해당 링크 주소를 채우면 setHref() 가 먼저 실채널 URL 을
+    //   넣으므로 이 함수는 그 지점을 건드리지 않는다(=자동 원복). 코드 수정 불필요.
+    // ========================================================================
+    function ctaDead(a) {
+        if (!a) { return false; }
+        var h = a.getAttribute('href');
+        return h === null || h === '' || h === '#' || h === '#none';
+    }
+    // 라벨로 CTA 종류를 판별한다 (아이콘 클래스 우선 — 라벨은 원장이 바꿀 수 있다)
+    function ctaKind(el) {
+        if (el.querySelector('.icon-kakao-cs')) { return 'kakao'; }
+        if (el.querySelector('.icon-naver-booking, .icon-naver-booking2')) { return 'naver'; }
+        if (el.querySelector('.icon-tel-cs')) { return 'tel'; }
+        var t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (t.indexOf('카카오') !== -1) { return 'kakao'; }
+        if (t.indexOf('네이버 예약') !== -1 || t.indexOf('네이버예약') !== -1) { return 'naver'; }
+        if (t.indexOf('예약') !== -1) { return 'reserve'; }
+        if (t.indexOf('전화') !== -1) { return 'tel'; }
+        return '';
+    }
+    function hideCta(el) {
+        // li 단위로 숨겨야 quick 바의 칸이 남지 않는다 (li 가 없으면 자기 자신)
+        var target = el.closest ? (el.closest('li') || el) : el;
+        target.style.display = 'none';
+        target.setAttribute('data-zia-cta-hidden', '1');
+    }
+    // 숨긴 칸이 생기면 남은 칸이 바를 고르게 채우도록 폭 규칙을 얹는다
+    // (원본 CSS 의 33.333% 고정 → 남은 1칸이 왼쪽에 몰리는 것 방지. 원본 파일 무손상)
+    function ensureQuickFlexStyles() {
+        if (document.getElementById('zia-quick-flex-style')) { return; }
+        var css = [
+            // 모바일·태블릿: 가로 바 — 남은 칸이 바 전체를 고르게 나눠 갖는다
+            '@media screen and (max-width:1199px){',
+            '#quick ul li:not([data-zia-cta-hidden]){width:auto;',
+            'flex-grow:1;flex-shrink:1;flex-basis:0%;}',
+            '}',
+            // PC: 세로 바 — 높이가 320px 고정이라 숨긴 칸만큼 빈 상자가 남는다
+            '@media screen and (min-width:1200px){',
+            '#quick{height:auto;}',
+            '}'
+        ].join('');
+        var st = document.createElement('style');
+        st.id = 'zia-quick-flex-style';
+        st.appendChild(document.createTextNode(css));
+        (document.head || document.body).appendChild(st);
+    }
+    function hardenCtas(S) {
+        // 수정 모드는 제외 — 원장이 눌러서 링크 주소를 채워야 할 지점을 숨기면 안 된다.
+        if (EDIT_MODE) { return; }
+        var tel = (S('link_tel') || '').trim();
+        if (!tel) {
+            var num = (S('phone') || CONFIG.phone || '').toString().trim();
+            if (num) { tel = 'tel:' + num.replace(/\s+/g, ''); }
+        }
+        // (가) 예약 CTA — 전 페이지 공통 지점 + 페이지별 지점
+        var reserveSel = [
+            'header .btn.appointment',              // C3 — GNB 우측 "진료 예약하기"
+            '.bottom-banner .btn-area a',           // C5 — 하단 배너 "진료예약"
+            '.section-08 .btn-group .btn-reserve',  // I13 — 홈 §8 "진료예약"
+            '.address-banner .btn-group a'          // L4 — 오시는 길 "진료예약"
+        ].join(',');
+        qsa(reserveSel).forEach(function (a) {
+            if (!ctaDead(a)) { return; }
+            var kind = ctaKind(a);
+            if (kind === 'kakao' || kind === 'naver') { hideCta(a); ensureQuickFlexStyles(); return; }
+            if (tel) { a.setAttribute('href', tel); a.removeAttribute('target'); }
+        });
+        // (나) 채널 전용 버튼 — quick 바 / CRM 슬라이드 예약 카드
+        var hid = false;
+        qsa('#quick ul li a, .slide2 .appointment-grid .appoint-card').forEach(function (a) {
+            if (!ctaDead(a)) { return; }
+            var kind = ctaKind(a);
+            if (kind === 'kakao' || kind === 'naver') { hideCta(a); hid = true; return; }
+            if (kind === 'tel' && tel) { a.setAttribute('href', tel); }
+            // kind === '' (맨 위로 버튼 등) 은 건드리지 않는다
+        });
+        if (hid) { ensureQuickFlexStyles(); }
+        // (다) 홈 히어로 slide1 "진료예약" 버튼 — <button> 이라 href 가 없다.
+        //      channel.js(ZIA_CONFIG.naverBookingUrl)·I3(link_reserve) 둘 다 비어
+        //      아무 핸들러도 안 붙은 상태에서만 전화 폴백을 건다 (이중 배선 방지).
+        if (!(CONFIG.naverBookingUrl || '').trim() && !(S('link_reserve') || '').trim() && tel) {
+            var btns = qsa('.slide1 .appointment-row button');
+            if (btns[1]) { bindButtonNav(btns[1], tel); }
+        }
+    }
+
+    // ========================================================================
+    // C-9 — 목적지 없는 후기 카드
+    // ------------------------------------------------------------------------
+    // more_url 도 naver_place_review_url 도 비면 reviewTextSlide/reviewGridItem 은
+    // href="#none" 을 남긴다. 방문자에게는 "더보기" 화살표가 달린 카드를 눌러도
+    // 아무 일이 없는 상태다. 링크가 아님을 시각·동작 양쪽에서 일치시킨다:
+    //   href 제거(=링크 아님, 커서·포커스 정상화) + "더보기" 어포던스 숨김.
+    // 후기 문구 자체는 그대로 남으므로 읽을거리는 손실되지 않는다.
+    // 링크 주소가 채워지면 setHref() 가 href 를 넣어 이 함수가 건너뛴다(자동 원복).
+    // ========================================================================
+    function ensureDeadCardStyles() {
+        if (document.getElementById('zia-deadcard-style')) { return; }
+        var st = document.createElement('style');
+        st.id = 'zia-deadcard-style';
+        st.appendChild(document.createTextNode(
+            '.review-card[data-zia-nolink],.review-item[data-zia-nolink]{cursor:default;}'
+        ));
+        (document.head || document.body).appendChild(st);
+    }
+    function hardenReviewCards() {
+        if (EDIT_MODE) { return; } // 수정 모드는 후기 카드 자체가 편집 대상
+        var cards = qsa('.review-card, .review-item');
+        var touched = false;
+        cards.forEach(function (a) {
+            if (a.getAttribute('href') !== '#none') { return; }
+            a.removeAttribute('href');
+            a.setAttribute('data-zia-nolink', '1');
+            var more = a.querySelector('.btn-more');
+            if (more) { more.style.display = 'none'; }
+            touched = true;
+        });
+        if (touched) { ensureDeadCardStyles(); }
+    }
+
+    // ========================================================================
+    // C-10 — src 없는 <img> 청소
+    // ------------------------------------------------------------------------
+    // fillPanelVisual 이 placeholder 패널에 .img-row > img 골격을 만들 때 zone 에
+    // hero_image_path 가 없으면 src 없는 <img> 가 DOM 에 남는다. 렌더 결과는
+    // 0×0 이지만 브라우저에 따라 깨진 이미지 아이콘이 나올 수 있고, 무엇보다
+    // "이미지가 있는데 못 불러왔다"는 잘못된 신호다. 사진이 없으면 자리도 없어야 한다.
+    // ========================================================================
+    function dropEmptyImages() {
+        // 수정 모드에서는 빈 사진 자리가 곧 "여기에 사진을 넣으세요" 클릭 지점이다.
+        if (EDIT_MODE) { return; }
+        qsa('img').forEach(function (img) {
+            var src = img.getAttribute('src');
+            if (src !== null && src !== '') { return; }
+            var row = img.parentNode;
+            img.parentNode.removeChild(img);
+            // .img-row 안에 아무것도 안 남으면 빈 상자도 제거
+            if (row && row.classList && row.classList.contains('img-row') && !row.children.length) {
+                if (row.parentNode) { row.parentNode.removeChild(row); }
+            }
+        });
+    }
+
+    // ========================================================================
+    // V-1 / V-2 — 공백 없는 긴 문자열(URL·띄어쓰기 없는 한글) 줄바꿈 보정
+    // ------------------------------------------------------------------------
+    // V-1 (faq): 전역 CSS 가 `word-break: keep-all` 이고 .faq-q 의 flex 아이템에
+    //   min-width:0 이 없어, 답변·질문에 긴 URL 한 줄만 들어가도 질문 strong 이
+    //   최대 너비로 뻗어 **페이지 전체가 가로로 넘쳤다** (390 폭 실측 +451px).
+    //   FAQ 가 이번 개편으로 CMS 편집 대상이 되면서 발현 확률이 크게 올랐다.
+    // V-2 (카드 제목): -webkit-line-clamp 만 있고 줄바꿈 보정이 없어 공백 없는 긴 제목이
+    //   카드 폭을 넘어 글자 중간에서 잘리고 말줄임 표시도 나오지 않았다.
+    // ⚠ 원스 원본 CSS(style.css·main.css·sub.css)는 건드리지 않는다. 회귀 범위를 좁히려고
+    //   **해당 블록 한정 규칙**만 런타임 <style> 로 얹는다 (데이터 결합 없는 코드 상수).
+    // ⚠ overflow-wrap:break-word 로는 부족하다 — keep-all 상태에서 CJK 긴 문자열이
+    //   끊기지 않아 실측상 여전히 넘쳤다(390 폭 +401px). anywhere 만 두 경우를 다 막는다.
+    // ========================================================================
+    function ensureTextWrapStyles() {
+        if (document.getElementById('zia-textwrap-style')) { return; }
+        var css = [
+            // V-1 — 자주 묻는 질문 (faq.html F2 / 홈 §7 I9 / autonomic 정적 블록 공통)
+            '.faq-q{min-width:0;}',
+            '.faq-q .q-wrap,.faq-q strong{min-width:0;overflow-wrap:anywhere;}',
+            '.faq-a p{overflow-wrap:anywhere;}',
+            // V-2 — 글 카드 제목 (홈 I7 / autonomic A2 / zone.html Z3 공통)
+            '.case-card .info-overlay .title{min-width:0;overflow-wrap:anywhere;}'
+        ].join('');
+        var st = document.createElement('style');
+        st.id = 'zia-textwrap-style';
+        st.appendChild(document.createTextNode(css));
+        (document.head || document.body).appendChild(st);
     }
 
     // DOMContentLoaded 대기 — 본 스크립트는 </body> 직전 동기 실행이라 이 시점의
@@ -1775,9 +2600,10 @@
         };
 
     // 글 상세 fetch (post.html 전용) — id 없으면 즉시 null (notfound 경로)
+    // ⚠ id 부재는 "조회 실패"가 아니라 "그런 글이 없다" → 빈 배열로 구분한다 (C-3).
     var detailPromise = (KIND === 'post' && POST_ID)
         ? fetchRows('v_public_post_detail?select=*&id=eq.' + POST_ID + '&limit=1')
-        : Promise.resolve(null);
+        : Promise.resolve([]);
 
     // 자유 편집 결과(P3-f) — 다른 소스와 **병렬** 시작 (지연 추가 0). 실패 시 null.
     var overridesPromise = fetchRows(
@@ -1792,8 +2618,26 @@
         markInjectDone(); // P3-e — 주입 완료 신호 (성공·부분 실패 폴백 모두 이 시점 확정)
     }
 
-    Promise.all([domReady, settleAll(keys.map(function (k) { return fetchRows(SOURCES[k]); })),
-        detailPromise, overridesPromise])
+    var sourceFetches = keys.map(function (k) { return fetchRows(SOURCES[k]); });
+
+    // P3-h — 테마 주입은 settings 도착 "즉시" 실행한다 (가장 이른 안전 지점).
+    // 왜 여기인가:
+    //  ① 테마 값은 settings fetch 결과에 의존 → fetch resolve 이전은 원리적으로 불가.
+    //  ② 산출물은 <head> 의 <style> 한 장뿐 — 본문 DOM 을 전혀 건드리지 않으므로
+    //     DOMContentLoaded 나 다른 소스 fetch 를 기다릴 이유가 없다 (본 스크립트는
+    //     </body> 직전 동기 실행 = head 는 이미 존재). apply() 시점(모든 fetch +
+    //     domReady 이후)까지 미루면 가장 느린 소스만큼 옛 색 노출이 길어진다.
+    //  ③ "색이 전혀 안 번쩍이는" 보장은 원리적으로 불가능하다 — 값이 DB 에서 오므로
+    //     첫 페인트가 fetch 응답보다 빠를 수 있다. 이 지점은 그 노출 시간을 최소로
+    //     줄이는 선택이다. (같은 promise 를 settleAll 에도 그대로 전달 — 이중 fetch 0.)
+    var settingsIdx = keys.indexOf('settings');
+    if (settingsIdx !== -1) {
+        sourceFetches[settingsIdx].then(function (rows) {
+            safe(function () { injectTheme(rows); });
+        });
+    }
+
+    Promise.all([domReady, settleAll(sourceFetches), detailPromise, overridesPromise])
         .then(function (out) {
             var results = out[1];
             var data = {};
@@ -1803,6 +2647,7 @@
             });
             data.postDetail = out[2];
             safe(function () { apply(data); });
+            safe(function () { injectNotice(data.settings); });
             // P3-f — 주입이 전부 끝난 **뒤** 자유 편집 결과 적용 (주입이 덮으면 안 됨)
             safe(function () { applyOverrides(out[3], finishInject); });
             setTimeout(finishInject, 2500); // 안전망 (sanitizer 지연·예외에도 신호 보장)

@@ -8,8 +8,10 @@
 //         이동(zia-edit-nav)은 인-플레이스로 못 고치는 것(발행·순서변경 등)의 폴백으로
 //         팝오버 안 [자세히 관리] 버튼에 남는다 (회귀 금지선 §9).
 //
-// [활성 조건] URL 에 ?edit=1 (또는 &edit=1) 이 있을 때만. 없으면 첫 줄에서 즉시 종료 —
-//   일반 방문자에게는 DOM 접근·스타일 주입·리스너 등록이 일체 없다 (계약 §9).
+// [활성 조건] ① URL 에 ?edit=1 (또는 &edit=1) 이 있고, ② 관리자 화면(같은 주소의 부모 창)
+//   안에서 열렸을 때만. 둘 중 하나라도 아니면 즉시 종료 — 일반 방문자에게는 DOM 접근·
+//   스타일 주입·리스너 등록이 일체 없다 (계약 §9). 부모 없이 단독 점검할 때는 ?free=1 을 함께.
+//   (관리자 주소가 유출돼 방문자가 ?edit=1 을 눌러도 편집 껍데기를 보지 않게 하기 위함 — E-4)
 //
 // [쓰기 금지] 자식(site)은 anon 읽기 전용이다 (계약 §1-2). 이 파일에는 저장 경로가 없다.
 //   저장은 전부 postMessage(zia-edit-save) 로 부모(admin 인증 세션)에게 요청하고
@@ -22,7 +24,9 @@
 //
 // [주고받는 신호]
 //   올림: zia-edit-ready / zia-edit-save / zia-edit-pick / zia-edit-nav   (계약 §6)
+//         + zia-edit-revert {reqId, target:{override:{page,selector}}} — 자유 편집 되돌리기 (E-1)
 //   받음: zia-edit-saved / zia-edit-picked / zia-edit-refresh / zia-edit-mode (계약 §6)
+//         + zia-edit-reverted {reqId, ok, message} — 되돌리기 결과 (E-1)
 //         + zia-edit-place / zia-edit-place-cancel (계약 §7 "상시 모드" — 부모가 이미 보내고 있어
 //           자식에서 받을 자리 표시·배치까지 구현. 계약 §6 표에는 아직 없는 확장 신호)
 //
@@ -43,19 +47,60 @@
     var PAGE = PATH.split('/').pop() || 'index.html';    // 저장 키에 쓰는 페이지 파일명
     var CONFIG = window.ZIA_CONFIG || {};
     var SUPA_URL = (CONFIG.supabaseUrl || '').trim().replace(/\/+$/, '');
+    // 공개 키(anon). 쓰기에는 쓰지 않는다 — "지금 고쳐 놓은 자리" 목록을 읽는 GET 전용
+    // (계약 §1-2 자식 읽기 전용. 저장·삭제는 전부 부모에게 요청한다).
+    var SUPA_KEY = (CONFIG.supabaseKey || '').trim();
 
     var mFocus = /[?&]focus=([A-Za-z0-9_]+)(&|$)/.exec(window.location.search);
     var FOCUS_ID = mFocus ? mFocus[1] : null;
-    var IN_IFRAME = (function () {
-        try { return !!(window.parent && window.parent !== window); } catch (e) { return true; }
-    })();
-    // 자유 편집(L3) 기본 OFF. 부모의 zia-edit-mode 로 켜진다.
-    // ?free=1 은 부모 없이 단독 점검할 때 쓰는 수동 스위치 (부모 신호가 항상 우선).
-    var freeEdit = /[?&]free=1(&|$)/.test(window.location.search);
 
-    var SAVE_TIMEOUT_MS = 15000;   // 부모 무응답 판정
+    // ── [E-4] 편집 UI 노출 조건 ───────────────────────────────────────
+    // ?edit=1 만으로는 켜지 않는다. 관리자 화면(같은 주소의 부모 창) 안에서 열렸을 때만 켠다.
+    // 관리자 주소가 밖으로 새어 방문자가 눌러도 "수정 모드" 껍데기를 보지 않게 하기 위함.
+    // (저장은 원래도 부모 인증 세션에서만 되므로 보안이 아니라 "미완성 화면 노출" 방지다.)
+    // 단독 점검용 스위치 = ?free=1 (기존 수동 스위치 계승). 이때도 저장 경로는 없다.
+    var STANDALONE = /[?&]free=1(&|$)/.test(window.location.search);
+    var PARENT_ADMIN = (function () {
+        try {
+            if (!window.parent || window.parent === window) { return false; }
+            return window.parent.location.origin === window.location.origin; // 다른 주소면 접근 자체가 막힌다
+        } catch (e) { return false; }
+    })();
+    if (!PARENT_ADMIN && !STANDALONE) {
+        hideAdminOnlyUi();
+        return;                                     // 그 밖에는 완전 무동작
+    }
+    // 관리 전용 표시 중 이 파일이 만들지 않은 것들 — 주입 코드가 ?edit=1 만 보고 만든다.
+    // 그 파일은 지금 손댈 수 없으므로, 관리자 화면 밖에서는 여기서 가려 준다 (E-4).
+    //   · "링크 주소" 묶음 = footer 끝 블록 1개 → 통째로 걷어낸다.
+    //   · 홈 칸 딱지("N번 칸") = 캐러셀 칸 위에 얹힌 딱지 → 숨기기만 한다.
+    //     칸 자체를 지우면 캐러셀이 칸 수를 잘못 세어 넘김이 어긋난다 (구조 무변경 원칙).
+    function hideAdminOnlyUi() {
+        var st = document.createElement('style');
+        st.appendChild(document.createTextNode('.zia-slot{display:none !important;}'));
+        (document.head || document.documentElement).appendChild(st);
+        function drop() {
+            ['zia-link-edit', 'zia-link-edit-style'].forEach(function (id) {
+                var n = document.getElementById(id);
+                if (n && n.parentNode) { n.parentNode.removeChild(n); }
+            });
+        }
+        drop();
+        document.addEventListener('zia:inject-done', drop);   // 주입이 끝난 뒤 한 번 더
+        setTimeout(drop, 5000);                               // 완료 신호가 안 오는 경우 안전망
+    }
+
+    // 자유 편집(L3) 기본 OFF. 부모의 zia-edit-mode 로 켜진다.
+    // 단독 점검(?free=1)일 때는 처음부터 켜 둔다 (부모 신호가 항상 우선).
+    var freeEdit = STANDALONE;
+
+    var SAVE_TIMEOUT_MS = 15000;   // 여기까지 회신이 없으면 "아직 확인 중" 안내 (실패 단정 X — E-2)
+    var SAVE_GIVEUP_MS = 120000;   // 여기까지도 회신이 없으면 "확인하지 못했어요" (화면 값은 유지)
     var PICK_TIMEOUT_MS = 120000;  // 사람이 고르는 시간 — 넉넉히
     var MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+    // [E-5] 붙여넣기 사고 방어 상한. 부모에는 상한이 없으므로 자식이 더 엄격한 쪽 = 충돌 없음.
+    var MAX_TEXT_LEN = 2000;       // 글자 수(꾸밈 태그 제외)
+    var MAX_RICH_LEN = 20000;      // 꾸밈 포함 원문 길이 — 태그 폭탄 방어
 
     // 관리 화면별 색 (표시 전용)
     var SCREEN_COLORS = {
@@ -75,15 +120,26 @@
      * §1. 스타일 (JS 주입 — 사이트 CSS 파일 무수정 원칙)
      * ════════════════════════════════════════════════════════════════ */
     var CSS = '' +
-        /* 상단 안내 바 */
-        '.zia-ov-bar{position:fixed;top:0;left:0;right:0;z-index:2147483200;display:flex;align-items:center;' +
-        'justify-content:center;gap:10px;flex-wrap:wrap;min-height:48px;padding:6px 12px;background:#22344c;' +
-        'color:#fff;font-family:' + FONT + ';font-size:15px;font-weight:700;line-height:1.3;text-align:center;' +
-        'box-shadow:0 2px 10px rgba(0,0,0,.28);}' +
+        /* 안내 바 — 화면 왼쪽 아래 구석에 작게 띄운다 (E-6).
+           위쪽에 가로로 깔면 사이트 고정 헤더(로고·메뉴·예약 버튼)를 덮어 정작 헤더를
+           고칠 수 없다. 사이트가 쓰는 자리는 위(header, 고정)와 오른쪽 아래(#quick, 고정)
+           뿐이므로 왼쪽 아래로 피하고, 한 번 눌러 접을 수 있게 한다.
+           문서 흐름을 건드리지 않으므로 100vh 히어로·고정 헤더 레이아웃은 그대로다. */
+        '.zia-ov-bar{position:fixed;left:12px;bottom:12px;z-index:2147483200;display:flex;align-items:flex-end;' +
+        'gap:8px;max-width:calc(100vw - 24px);font-family:' + FONT + ';}' +
+        /* 좁은 화면: 사이트 하단 고정 메뉴(#quick) 위로 올린다 */
+        '@media (max-width:1199px){.zia-ov-bar{bottom:calc(21.4vw + 12px);}}' +
+        '@media (min-width:768px) and (max-width:1199px){.zia-ov-bar{bottom:94px;}}' +
+        '.zia-ov-bar-panel{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:44px;' +
+        'padding:6px 12px;border-radius:12px;background:#22344c;color:#fff;font-size:14px;font-weight:700;' +
+        'line-height:1.3;box-shadow:0 4px 14px rgba(0,0,0,.32);}' +
+        '.zia-ov-bar.mini .zia-ov-bar-panel{display:none;}' +
         '.zia-ov-bar .zia-ov-state{font-size:13px;font-weight:600;opacity:.85;}' +
-        '.zia-ov-bar button{min-height:40px;padding:0 16px;border-radius:8px;border:1px solid rgba(255,255,255,.55);' +
+        '.zia-ov-bar button{min-height:40px;padding:0 14px;border-radius:8px;border:1px solid rgba(255,255,255,.55);' +
         'background:rgba(255,255,255,.12);color:#fff;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;}' +
         '.zia-ov-bar button:hover{background:rgba(255,255,255,.25);}' +
+        '.zia-ov-bar-toggle{width:48px;height:48px;flex:none;padding:0;border-radius:50%;background:#22344c;' +
+        'border:2px solid #fff;font-size:20px;box-shadow:0 4px 14px rgba(0,0,0,.32);}' +
         /* 편집 가능 표시 (outline 은 레이아웃 불변) */
         '.zia-ov-mark{outline:2px dashed var(--zia-ov-color,' + COLOR_EDIT + ') !important;outline-offset:3px;}' +
         '.zia-ov-hot{outline:3px solid var(--zia-ov-color,' + COLOR_EDIT + ') !important;outline-offset:3px;' +
@@ -174,12 +230,22 @@
         return (h >>> 0).toString(36);
     }
     // 이미지 경로 해석 (cms-inject 경로 규약 답습)
+    // ⚠ [E-3] 여기 들어오는 값은 두 종류다.
+    //   (가) 저장소에 올린 사진의 보관 경로 ('2026/07/foo.jpg') — 저장소 공개 주소로 바꾼다.
+    //   (나) 지금 화면에 걸려 있는 주소 (readValue 가 img 의 src 를 그대로 읽어 온 값).
+    //        하위 경로 배포(/zia-preview/…)에서는 이미 '/zia-preview/static/…' 형태다.
+    //   예전에는 (나)가 '/static/' 으로 시작하지 않는다는 이유로 (가)로 오인돼 없는 주소를
+    //   만들었고, 팝오버의 "지금 보이는 사진"이 깨졌다. 아래 3·4번 규칙이 그 갈림길이다.
     function mediaUrl(p) {
         p = String(p == null ? '' : p).trim();
         if (!p) { return ''; }
-        if (/^https?:\/\//i.test(p) || /^data:/i.test(p)) { return p; }
-        if (p.indexOf('/static/') === 0) { return BASE + p; }
-        if (SUPA_URL) { return SUPA_URL + '/storage/v1/object/public/zia-media/' + p.replace(/^\/+/, ''); }
+        if (/^(https?:)?\/\//i.test(p) || /^data:/i.test(p)) { return p; }   // 절대 주소·프로토콜 생략 주소
+        if (p.indexOf('/static/') === 0) { return BASE + p; }                // 사이트 기본 사진 (운영 도메인 기준 표기)
+        if (p.charAt(0) === '/' && p.indexOf('/static/') > 0) { return p; }  // 이미 하위 경로가 붙은 주소 → 그대로
+        if (/^\.{0,2}\/?static\//.test(p)) {                                 // 상대 표기 ('static/…', './static/…')
+            return BASE + '/' + p.replace(/^[.\/]+/, '');
+        }
+        if (SUPA_URL) { return SUPA_URL + '/storage/v1/object/public/zia-media/' + encodeURI(p.replace(/^\/+/, '')); }
         return p;
     }
 
@@ -208,45 +274,63 @@
      *   부모→자식: zia-edit-saved / zia-edit-picked / zia-edit-refresh / zia-edit-mode
      * ════════════════════════════════════════════════════════════════ */
     var reqSeq = 0;
-    var pending = {};   // reqId → { done, timer }
+    var pending = {};   // reqId → { done, timer, giveUp, waiting }
 
     function sendToParent(msg) {
-        if (!IN_IFRAME) { return false; }
+        if (!PARENT_ADMIN) { return false; }
         try {
             window.parent.postMessage(msg, window.location.origin);
             return true;
         } catch (e) { return false; }
     }
-    // 응답을 기다리는 요청. done(res) 는 성공/실패 공통 1회 호출.
-    function request(msg, timeoutMs, done) {
+    // 응답을 기다리는 요청. done(res, late) 는 성공/실패 공통 1회 호출.
+    //
+    // [E-2] 오래 걸린다 ≠ 실패다.
+    //   부모의 실제 저장 요청에는 중단이 없어서, 자식이 15초에 "실패"로 단정하면
+    //   20초 뒤 진짜로 저장돼 사이트가 바뀌는데 원장은 실패로 안다 — 정반대의 오해.
+    //   그래서 waitOpts.onWait 를 준 요청은 timeoutMs 에 **끝내지 않고** "아직 확인 중"만
+    //   알린 뒤 계속 기다린다. 늦게 도착한 회신도 정상 처리된다(late=true 로 표시).
+    //   waitOpts 가 없는 요청(사람이 고르는 흐름 등)은 종전대로 timeoutMs 에 종료한다.
+    function request(msg, timeoutMs, done, waitOpts) {
         var id = ++reqSeq;
         msg.reqId = id;
         if (!sendToParent(msg)) {
-            done({ ok: false, message: '지금은 저장할 수 없어요. 관리자 화면에서 홈페이지를 열어 주세요.' });
+            done({ ok: false, message: '지금은 저장할 수 없어요. 관리자 화면에서 홈페이지를 열어 주세요.' }, false);
             return id;
         }
-        pending[id] = {
-            done: done,
-            timer: setTimeout(function () {
-                var p = pending[id];
+        var p = { done: done, waiting: false };
+        p.timer = setTimeout(function () {
+            if (pending[id] !== p) { return; }
+            if (!waitOpts || !waitOpts.onWait) {
                 delete pending[id];
-                if (p) { p.done({ ok: false, message: '응답이 없어요. 잠시 후 다시 시도해 주세요.' }); }
-            }, timeoutMs)
-        };
+                p.done({ ok: false, message: '응답이 없어요. 잠시 후 다시 시도해 주세요.' }, false);
+                return;
+            }
+            p.waiting = true;
+            try { waitOpts.onWait(); } catch (e) { /* 안내 실패는 무해 */ }
+            p.giveUp = setTimeout(function () {
+                if (pending[id] !== p) { return; }
+                delete pending[id];
+                // 실패가 아니라 "모른다". 화면 값을 되돌리지 않는다 (오도 금지).
+                p.done({ ok: false, unknown: true }, true);
+            }, waitOpts.giveUpMs || SAVE_GIVEUP_MS);
+        }, timeoutMs);
+        pending[id] = p;
         return id;
     }
     function resolveRequest(res) {
         var p = pending[res.reqId];
         if (!p) { return; }
         clearTimeout(p.timer);
+        clearTimeout(p.giveUp);
         delete pending[res.reqId];
-        p.done(res);
+        p.done(res, !!p.waiting);
     }
     window.addEventListener('message', function (e) {
         if (e.origin !== window.location.origin) { return; }   // origin 검증 (계약 §1-4)
         var d = e.data;
         if (!d || typeof d !== 'object' || typeof d.type !== 'string') { return; }
-        if (d.type === 'zia-edit-saved' || d.type === 'zia-edit-picked') {
+        if (d.type === 'zia-edit-saved' || d.type === 'zia-edit-picked' || d.type === 'zia-edit-reverted') {
             resolveRequest(d);
         } else if (d.type === 'zia-edit-refresh') {
             // 부모가 목록 화면에서 데이터를 바꿨다 → 주입을 처음부터 다시 (edit 파라미터 유지)
@@ -265,6 +349,77 @@
     function goAdmin(hash) {
         if (sendToParent({ type: 'zia-edit-nav', hash: hash })) { return; }
         window.location.href = BASE + '/admin/index.html' + hash;
+    }
+
+    /* ══════════════════════════════════════════════════════════════════
+     * §3-2. "지금 고쳐 놓은 자리" 목록 — [원래대로] 버튼의 판정 근거 (E-1)
+     * ------------------------------------------------------------------
+     * 자유 편집으로 바꾼 자리는 화면에 아무 흔적이 남지 않는다. cms-inject 는 저장된
+     * 값을 textContent/innerHTML/src 로 조용히 갈아끼울 뿐 표시를 남기지 않고,
+     * 그 파일도 부모 파일도 여기서 고칠 수 없다. 그래서 판정 근거를 셋 둔다:
+     *
+     *   (a) 공개 목록 읽기 — v_public_page_overrides 를 이 페이지 몫만 GET 한다.
+     *       cms-inject 가 화면에 적용할 때 쓰는 바로 그 공개 뷰라 값이 어긋날 수 없고,
+     *       새로고침·다음 날 접속에도 유효하다. **읽기 전용 GET** 이므로 계약 §1-2
+     *       (자식은 anon 읽기 전용, 모든 쓰기는 부모) 를 위반하지 않는다.
+     *   (b) 이번에 저장에 성공한 자리 기억 — (a)를 다시 읽기 전에도 버튼이 뜬다.
+     *   (c) 되돌리기 성공분 제거 — 지운 자리에 [원래대로]가 남지 않게.
+     *
+     * (a)가 실패하면(설정 없음·차단·타임아웃) (b)만으로 동작한다. 그때는 방금 고친
+     * 자리에만 버튼이 뜨고, 예전에 고친 자리는 안 뜬다 — 조용한 축소이지 오작동은 아니다.
+     * 되돌리기 요청에는 **저장에 쓰인 그 자리 값**을 그대로 실어 보낸다 (새로 계산하면
+     * 부모가 지울 행을 못 찾을 수 있다).
+     * ════════════════════════════════════════════════════════════════ */
+    var overrideRows = [];    // [{ selector, kind }] — 공개 목록에서 읽은 것
+    var localOverrides = [];  // [{ node, selector, kind }] — 이번 화면에서 저장한 것
+
+    function loadOverrideList() {
+        if (!SUPA_URL || !SUPA_KEY || !window.fetch) { return; }
+        var url = SUPA_URL + '/rest/v1/v_public_page_overrides?select=selector,kind&page=eq.' +
+            encodeURIComponent(PAGE);
+        var ctrl = window.AbortController ? new AbortController() : null;
+        var timer = setTimeout(function () { if (ctrl) { try { ctrl.abort(); } catch (e) { /* noop */ } } }, 4000);
+        fetch(url, {
+            headers: { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY, Accept: 'application/json' },
+            signal: ctrl ? ctrl.signal : undefined
+        }).then(function (res) {
+            if (!res.ok) { throw new Error('HTTP ' + res.status); }
+            return res.json();
+        }).then(function (rows) {
+            clearTimeout(timer);
+            if (Array.isArray(rows)) {
+                overrideRows = rows.filter(function (r) { return r && r.selector; });
+            }
+        })['catch'](function () { clearTimeout(timer); });   // 실패 → (b)만으로 동작
+    }
+    function rememberOverride(info, selector) {
+        if (!selector) { return; }
+        for (var i = 0; i < localOverrides.length; i++) {
+            if (localOverrides[i].node === info.node) { localOverrides[i].selector = selector; return; }
+        }
+        localOverrides.push({ node: info.node, selector: selector, kind: info.kind });
+    }
+    function forgetOverride(selector) {
+        localOverrides = localOverrides.filter(function (o) { return o.selector !== selector; });
+        overrideRows = overrideRows.filter(function (r) { return r.selector !== selector; });
+    }
+    // 이 요소가 지금 자유 편집으로 바뀐 상태인가? → { selector, kind } 또는 null
+    function findOverride(node) {
+        var i, j, nodes;
+        for (i = 0; i < localOverrides.length; i++) {
+            if (localOverrides[i].node === node) { return localOverrides[i]; }
+        }
+        for (i = 0; i < overrideRows.length; i++) {
+            nodes = qsa(overrideRows[i].selector);
+            for (j = 0; j < nodes.length; j++) {
+                // 사진은 저장한 자리가 사진을 감싼 요소일 수도 있다 (cms-inject 적용 규칙과 동일)
+                if (nodes[j] === node ||
+                    (node.tagName === 'IMG' && nodes[j].querySelector && nodes[j].querySelector('img') === node)) {
+                    return overrideRows[i];
+                }
+            }
+        }
+        return null;
     }
 
     /* ══════════════════════════════════════════════════════════════════
@@ -338,6 +493,7 @@
                     kind: isSlot ? 'slot' : kind,
                     accept: f.accept || (f.source && f.source.accept) || 'photo',
                     label: f.label || '내용',
+                    longText: !!f.longText,   // 길이 안내를 붙일 자리인가 (긴 글만)
                     source: f.source || null,
                     adminHash: f.adminHash || null,
                     color: isSlot ? SCREEN_COLORS['#/home'] : COLOR_EDIT
@@ -543,6 +699,10 @@
      * §7. 오버레이 UI — 안내 바 / 토스트 / 핸들 / 팝오버
      * ════════════════════════════════════════════════════════════════ */
     var bar = null, stateLabel = null, handle = null, pop = null, popFor = null, toastTimer = null;
+    // 핸들·팝오버가 넘어가면 안 되는 화면 위쪽 여백.
+    // 예전엔 상단 안내 바(48px)를 피하느라 56 이었다. 바를 왼쪽 아래로 옮긴 뒤(E-6)
+    // 화면 맨 위까지 쓸 수 있게 됐다 — 사이트 헤더 위에도 핸들이 정상적으로 뜬다.
+    var TOP_SAFE = 8;
 
     function stripEditUrl() {
         var kept = window.location.search.replace(/^\?/, '').split('&').filter(function (kv) {
@@ -550,18 +710,31 @@
         });
         return PATH + (kept.length ? '?' + kept.join('&') : '') + window.location.hash;
     }
+    // 안내 바 — 왼쪽 아래 구석 (E-6). ✏️ 단추로 접었다 폈다 한다.
+    // 접어도 ✏️ 단추는 남으므로 "수정 모드 끄기"에 언제나 두 번 안에 닿는다.
     function buildBar() {
         bar = el('div', 'zia-ov-bar zia-ov');
-        bar.appendChild(el('span', null, '✏️ 수정 모드 — 고치고 싶은 곳을 누르세요'));
+        var toggle = el('button', 'zia-ov-bar-toggle', '✏️');
+        toggle.type = 'button';
+        toggle.title = '수정 모드 안내 접기/펴기';
+        toggle.setAttribute('aria-label', '수정 모드 안내 접기/펴기');
+        toggle.addEventListener('click', function () { bar.classList.toggle('mini'); });
+        bar.appendChild(toggle);
+
+        var panel = el('div', 'zia-ov-bar-panel');
+        panel.appendChild(el('span', null, '수정 모드 — 고칠 곳을 누르세요'));
         stateLabel = el('span', 'zia-ov-state', '');
-        bar.appendChild(stateLabel);
+        panel.appendChild(stateLabel);
         var off = el('button', null, '수정 모드 끄기');
         off.type = 'button';
         off.addEventListener('click', function () { window.location.href = stripEditUrl(); });
-        bar.appendChild(off);
+        panel.appendChild(off);
+        bar.appendChild(panel);
+
         document.body.appendChild(bar);
         renderState();
     }
+    function expandBar() { if (bar) { bar.classList.remove('mini'); } }
     function renderState() {
         if (!stateLabel) { return; }
         stateLabel.textContent = freeEdit ? '아무 곳이나 고치기: 켜짐' : '아무 곳이나 고치기: 꺼짐';
@@ -617,11 +790,11 @@
         var w = handle.offsetWidth || 120;
         var h = handle.offsetHeight || 40;
         var top = r.top - h - 4;
-        if (top < 56) { top = Math.min(r.top + 4, window.innerHeight - h - 8); }
+        if (top < TOP_SAFE) { top = Math.min(r.top + 4, window.innerHeight - h - 8); }
         var left = r.left + 6;
         if (left + w > window.innerWidth - 8) { left = Math.max(8, window.innerWidth - w - 8); }
         if (left < 8) { left = 8; }
-        handle.style.top = Math.max(56, top) + 'px';
+        handle.style.top = Math.max(TOP_SAFE, top) + 'px';
         handle.style.left = left + 'px';
     }
     function hideHandleSoon() {
@@ -653,11 +826,11 @@
         if (top + h > window.innerHeight - 8) {
             top = r.top - h - 8;                    // 아래가 좁으면 위로
         }
-        if (top < 56) {                             // 위도 좁으면 화면 안으로 클램프
-            top = Math.min(56, window.innerHeight - h - 8);
-            if (top < 56) { top = 56; }
+        if (top < TOP_SAFE) {                       // 위도 좁으면 화면 안으로 클램프
+            top = Math.min(TOP_SAFE, window.innerHeight - h - 8);
+            if (top < TOP_SAFE) { top = TOP_SAFE; }
         }
-        if (top + h > window.innerHeight - 8) { top = Math.max(56, window.innerHeight - h - 8); }
+        if (top + h > window.innerHeight - 8) { top = Math.max(TOP_SAFE, window.innerHeight - h - 8); }
         pop.style.left = left + 'px';
         pop.style.top = top + 'px';
     }
@@ -722,6 +895,15 @@
         return box;
     }
 
+    // 길이 안내는 길이가 실제 쟁점인 자리에만 붙인다.
+    // 전화번호 칸에 "최대 2,000자까지" 라고 적으면 도움이 아니라 소음이다
+    // (넘치게 붙여넣는 사고 방어는 maxLength·저장 검사가 그대로 맡는다 — 안내만 뺀다).
+    function lenHint(info, original) {
+        var long = (info && info.longText) || (info && info.kind === 'html') ||
+            String(original || '').length >= 300;
+        return long ? ' 최대 ' + comma(MAX_TEXT_LEN) + '자까지 넣을 수 있어요.' : '';
+    }
+
     // L1 text — 한 줄 입력 / 여러 줄이면 textarea
     function buildTextPopover(info) {
         var original = readValue(info);
@@ -730,12 +912,15 @@
         var input = multi ? el('textarea') : el('input');
         if (!multi) { input.type = 'text'; }
         input.value = original;
+        input.maxLength = MAX_TEXT_LEN;   // [E-5] 붙여넣기 사고 방어 — 넘치면 잘려 들어온다
         box.body.appendChild(input);
         box.body.appendChild(el('p', 'zia-ov-hint',
-            multi ? '고친 뒤 [저장]을 누르세요. Esc를 누르면 취소돼요.'
-                  : 'Enter를 누르면 저장, Esc를 누르면 취소돼요.'));
+            (multi ? '고친 뒤 [저장]을 누르세요. Esc를 누르면 취소돼요.'
+                   : 'Enter를 누르면 저장, Esc를 누르면 취소돼요.') +
+            lenHint(info, original)));
         var save = addBtn(box, '저장', 'pri', function () { doSave(box, info, input.value, original); });
         addBtn(box, '취소', null, closePopover);
+        addRevertBtn(box, info);
         if (info.adminHash) { addBtn(box, '자세히 관리', null, function () { goAdmin(info.adminHash); }); }
         input.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') { e.preventDefault(); closePopover(); }
@@ -774,12 +959,22 @@
 
         box.body.appendChild(tools);
         box.body.appendChild(rich);
-        box.body.appendChild(el('p', 'zia-ov-hint', '글자를 끌어서 고른 뒤 위 버튼을 누르면 꾸밀 수 있어요. Esc는 취소.'));
+        box.body.appendChild(el('p', 'zia-ov-hint',
+            '글자를 끌어서 고른 뒤 위 버튼을 누르면 꾸밀 수 있어요. Esc는 취소.' +
+            lenHint(info, original)));
         addBtn(box, '저장', 'pri', function () { doSave(box, info, sanitizeHtml(rich.innerHTML), original); });
         addBtn(box, '취소', null, closePopover);
+        addRevertBtn(box, info);
         if (info.adminHash) { addBtn(box, '자세히 관리', null, function () { goAdmin(info.adminHash); }); }
         rich.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') { e.preventDefault(); closePopover(); }
+        });
+        // [E-5] 붙여넣기로 길이가 넘치면 저장 전에 미리 알려 준다 (저장 단계에서 한 번 더 막는다)
+        var lenWarned = false;
+        rich.addEventListener('input', function () {
+            var over = tooLong('html', rich.innerHTML);
+            if (over) { lenWarned = true; setMsg(box, over, 'err'); }
+            else if (lenWarned) { lenWarned = false; setMsg(box, '', null); }
         });
         // 서식 편집은 sanitizer 가 있어야 안전 — 없으면 알려주고 글자만 고치기로 강등
         ensureSanitizer(function (ok) {
@@ -851,6 +1046,7 @@
                 });
         });
         addBtn(box, '닫기', null, closePopover);
+        addRevertBtn(box, info);
         if (info.adminHash) { addBtn(box, '자세히 관리', null, function () { goAdmin(info.adminHash); }); }
         return box;
     }
@@ -895,17 +1091,43 @@
             }
             return t;
         }
+        // 이미 고쳐 놓은 자리를 또 고치는 경우, 그때 쓴 자리 값을 그대로 다시 쓴다.
+        // 새로 계산한 값이 조금이라도 다르면 같은 자리에 두 벌이 쌓이고, [원래대로]로 한 벌만
+        // 지워지면 나머지가 남아 "되돌렸는데 그대로"가 된다. 그 자리 하나만 정확히 가리킬 때만 재사용.
+        var sel = null, prev = findOverride(info.node);
+        if (prev && prev.selector) {
+            var m = qsa(prev.selector);
+            if (m.length === 1 && m[0] === info.node) { sel = prev.selector; }
+        }
         return {
             override: {
                 page: PAGE,
-                selector: buildSelector(info.node),
+                selector: sel || buildSelector(info.node),
                 anchorHash: simpleHash(original == null ? readValue(info) : original)
             }
         };
     }
 
+    /* [E-5] 길이 상한 검사. 넘치면 사람 말로 된 안내 문구를, 아니면 null 을 돌려준다. */
+    function comma(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+    function tooLong(kind, value) {
+        if (kind !== 'text' && kind !== 'html') { return null; }
+        var raw = String(value == null ? '' : value);
+        var textLen = raw.replace(/<[^>]*>/g, '').length;
+        if (textLen > MAX_TEXT_LEN) {
+            return '내용이 너무 길어요. ' + comma(MAX_TEXT_LEN) + '자 안으로 줄여 주세요. (지금 ' +
+                comma(textLen) + '자)';
+        }
+        if (raw.length > MAX_RICH_LEN) {
+            return '꾸밈이 너무 많아요. 글을 조금 나누거나 [서식 지우기]를 눌러 주세요.';
+        }
+        return null;
+    }
+
     function doSave(box, info, value, original, pickedItem) {
         if (original == null) { original = readValue(info); }
+        var over = tooLong(info.kind, value);
+        if (over) { setMsg(box, over, 'err'); return; }
         if (info.kind !== 'slot' && info.kind !== 'image' &&
             String(value).replace(/<[^>]*>/g, '').trim() === '' &&
             String(original).replace(/<[^>]*>/g, '').trim() !== '') {
@@ -934,26 +1156,91 @@
             try { applyValue(info, value); applied = true; } catch (e) { /* 적용 실패는 무시 */ }
         }
 
+        var target = buildTarget(info, original);
+        function mine() { return pop === box; }            // 그 사이 팝오버가 닫혔는지
+        function say(text, cls) {
+            if (mine()) { setMsg(box, text, cls); } else { toast(text, cls === 'err'); }
+        }
+
         request({
             type: 'zia-edit-save',
-            target: buildTarget(info, original),
+            target: target,
             kind: info.kind,
             value: value,
             item: pickedItem || null
-        }, SAVE_TIMEOUT_MS, function (res) {
+        }, SAVE_TIMEOUT_MS, function (res, late) {
             btns.forEach(function (b) { b.disabled = false; });
             if (pri) { pri.textContent = priText; }
             if (res && res.ok) {
                 if (res.value != null && info.kind !== 'slot') {
                     try { applyValue(info, res.value); } catch (e) { /* noop */ }
                 }
-                closePopover();
-                toast(res.message || '저장했어요');
+                // 자유 편집분은 "지금 고쳐 놓은 자리"로 기억해 둔다 → [원래대로] 가 뜬다 (E-1)
+                if (info.tier === 'L3' && target.override) { rememberOverride(info, target.override.selector); }
+                if (mine()) { closePopover(); }
+                toast(late ? '조금 늦었지만 저장됐어요' : (res.message || '저장했어요'));
                 if (info.kind === 'slot') { window.setTimeout(function () { window.location.reload(); }, 900); }
+            } else if (res && res.unknown) {
+                // [E-2] 오래 걸려서 결과를 모르는 상태. 실패라고 말하지 않고, 화면 값도
+                // 되돌리지 않는다 (되돌리면 실제로는 저장됐는데 안 된 것처럼 보인다).
+                say('저장됐는지 아직 확인하지 못했어요. 화면을 새로 불러와 확인해 주세요.', 'err');
             } else {
                 if (applied) { try { applyValue(info, original); } catch (e) { /* noop */ } }
-                setMsg(box, (res && res.message) || '저장하지 못했어요. 잠시 후 다시 해 주세요.', 'err');
+                say((res && res.message) || '저장하지 못했어요. 잠시 후 다시 해 주세요.', 'err');
             }
+        }, {
+            // 15초가 지나도 회신이 없을 때 — "실패"가 아니라 "아직 확인 중"이라고 말한다.
+            onWait: function () {
+                if (pri) {
+                    pri.textContent = '';
+                    pri.appendChild(el('span', 'zia-ov-spin'));
+                    pri.appendChild(document.createTextNode('확인 중…'));
+                }
+                say('저장 요청을 보냈어요. 결과를 확인하는 중이에요 — 조금만 기다려 주세요.', null);
+            },
+            giveUpMs: SAVE_GIVEUP_MS
+        });
+    }
+
+    /* ── [원래대로] — 자유 편집으로 바꾼 자리를 처음 문구로 되돌린다 (E-1) ──────
+       자식은 지우지 않는다. 부모에게 zia-edit-revert 로 요청하고 zia-edit-reverted 를 기다린다.
+       성공하면 화면을 새로 불러온다 — 처음 문구는 저장된 값에 덮여 화면에 남아 있지 않으므로
+       다시 불러오는 것이 가장 확실하다. */
+    function addRevertBtn(box, info) {
+        if (info.tier !== 'L3') { return; }        // 정본 항목은 원래 값 폴백이 따로 있다
+        var ov = findOverride(info.node);
+        if (!ov) { return; }
+        box.body.appendChild(el('p', 'zia-ov-hint',
+            '이 자리는 지금 고쳐 놓은 상태예요. [원래대로]를 누르면 처음 문구로 돌아갑니다.'));
+        addBtn(box, '원래대로', null, function () { doRevert(box, info, ov); });
+    }
+    function doRevert(box, info, ov) {
+        if (!window.confirm('이 자리를 처음 문구로 되돌릴까요?\n지금 고쳐 놓은 내용은 사라집니다.')) { return; }
+        var btns = qsa('.zia-ov-btn', box);
+        btns.forEach(function (b) { b.disabled = true; });
+        function mine() { return pop === box; }
+        function say(text, cls) {
+            if (mine()) { setMsg(box, text, cls); } else { toast(text, cls === 'err'); }
+        }
+        say('처음 문구로 되돌리는 중이에요…', null);
+        request({
+            type: 'zia-edit-revert',
+            target: { override: { page: PAGE, selector: ov.selector } }
+        }, SAVE_TIMEOUT_MS, function (res, late) {
+            btns.forEach(function (b) { b.disabled = false; });
+            if (res && res.ok) {
+                forgetOverride(ov.selector);
+                if (mine()) { closePopover(); }
+                toast(res.message || (late ? '조금 늦었지만 되돌렸어요' : '처음 문구로 되돌렸어요'));
+                window.setTimeout(function () { window.location.reload(); }, 800);
+            } else if (res && res.unknown) {
+                say('되돌렸는지 아직 확인하지 못했어요. 화면을 새로 불러와 확인해 주세요.', 'err');
+            } else {
+                say((res && res.message) || '되돌리지 못했어요. 잠시 후 다시 해 주세요.', 'err');
+            }
+        }, {
+            onWait: function () { say('되돌리는 중이에요. 결과를 확인하고 있어요 — 조금만 기다려 주세요.', null); },
+            giveUpMs: SAVE_GIVEUP_MS
         });
     }
 
@@ -979,6 +1266,7 @@
         placing = p;
         marks.forEach(function (m) { m.node.classList.remove('zia-ov-drop-ok'); });
         if (!p) { renderState(); return; }
+        expandBar();   // 안내 문구가 접혀 있으면 펴 준다 (E-6)
         var n = 0;
         marks.forEach(function (m) {
             if (acceptsItem(m.info, p.accept)) { m.node.classList.add('zia-ov-drop-ok'); n++; }
@@ -1139,6 +1427,7 @@
 
         buildBar();
         collectMarks();
+        loadOverrideList();   // "지금 고쳐 놓은 자리" 목록 (읽기 전용 GET — E-1 판정 근거)
         bindPointer();
         keepEditOnLinks();
         applyFocus();
